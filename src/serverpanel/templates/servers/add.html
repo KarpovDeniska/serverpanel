@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Добавить провайдер — ServerPanel{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h2 class="text-2xl font-bold">Добавить провайдер</h2>
+    <p class="text-dark-muted mt-1">Подключить API провайдера для обнаружения серверов</p>
+</div>
+
+<div class="max-w-lg">
+    <div class="bg-dark-card border border-dark-border rounded-lg p-6">
+        {% if error %}
+        <div class="bg-red-900/30 border border-red-700 text-red-400 px-4 py-3 rounded mb-4 text-sm">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/servers/add" class="space-y-4">
+            <div>
+                <label class="block text-sm text-dark-muted mb-1">Тип провайдера</label>
+                <select name="provider_type"
+                        class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+                    {% for pt in provider_types %}
+                    <option value="{{ pt.type }}">{{ pt.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm text-dark-muted mb-1">Название (для себя)</label>
+                <input type="text" name="provider_name" required placeholder="Мой Hetzner"
+                       class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+            </div>
+
+            <div class="bg-dark-bg border border-dark-border rounded p-3 text-xs text-dark-muted">
+                <p class="font-medium text-dark-text mb-1">Где взять credentials?</p>
+                <p>Hetzner Robot → Settings → <a href="https://robot.hetzner.com/preferences/index" target="_blank" class="text-dark-accent hover:underline">Webservice and app settings</a></p>
+                <p class="mt-1">Нужен <strong>webservice-пользователь</strong> (не основной логин Robot). Создайте его, если ещё нет.</p>
+            </div>
+
+            <div>
+                <label class="block text-sm text-dark-muted mb-1">Webservice login</label>
+                <input type="text" name="credential_user" required placeholder="#ws+xxxxxxxxxxxxxxx"
+                       class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+            </div>
+
+            <div>
+                <label class="block text-sm text-dark-muted mb-1">Webservice пароль</label>
+                <input type="password" name="credential_password" required
+                       class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+            </div>
+
+            <div class="pt-2">
+                <button type="submit"
+                        class="w-full bg-dark-accent text-white rounded px-4 py-2 font-medium hover:bg-blue-600 transition-colors">
+                    Подключить и найти серверы
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

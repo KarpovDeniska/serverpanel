@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "serverpanel"
+version = "0.1.0"
+description = "Web panel for managing dedicated servers"
+requires-python = ">=3.12"
+# Dependencies use upper bounds to prevent silent breakage from major-version releases.
+# Rerun `uv pip compile pyproject.toml -o requirements-lock.txt` to regenerate the lock.
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.34,<1.0",
+    "sqlalchemy[asyncio]>=2.0,<3.0",
+    "aiosqlite>=0.20,<1.0",
+    "alembic>=1.14,<2.0",
+    "pydantic>=2.0,<3.0",
+    "pydantic-settings>=2.0,<3.0",
+    "jinja2>=3.1,<4.0",
+    "python-multipart>=0.0.18,<1.0",
+    "httpx>=0.28,<1.0",
+    "paramiko>=3.4,<5.0",
+    "bcrypt>=4.0,<5.0",
+    "cryptography>=44.0,<48.0",
+    "itsdangerous>=2.2,<3.0",
+    "pyyaml>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-asyncio>=0.24,<2.0",
+    "httpx>=0.28,<1.0",
+    "ruff>=0.8,<1.0",
+]
+oauth = [
+    "authlib>=1.3",
+]
+postgres = [
+    "asyncpg>=0.30",
+]
+
+[project.scripts]
+serverpanel = "serverpanel.main:cli"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "C4", "S"]
+ignore = [
+    "E501",   # line length — handled by formatter
+    "B008",   # FastAPI uses function calls in Depends() defaults
+    "B017",   # pytest.raises(Exception) used sparingly in config tests
+    "B905",   # zip without strict= — fine for our short lists
+    "S101",   # assert used — ok in tests
+    "S104",   # 0.0.0.0 bind is intentional; operator restricts via reverse proxy
+    "S105",   # module-level sentinel like _INSECURE_SECRET_KEY is not a real password
+    "S108",   # /tmp usage is on the rescue Linux host, not the panel host
+    "S603",   # subprocess — rare and audited
+    "S608",   # SQL injection false-positive in SQLAlchemy expressions
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B017"]  # tests may use hard-coded secrets, assert, etc.
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/serverpanel"]

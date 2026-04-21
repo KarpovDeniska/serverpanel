@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Регистрация — ServerPanel{% endblock %}
+
+{% block content_public %}
+<div class="w-full max-w-sm">
+    <div class="bg-dark-card border border-dark-border rounded-lg p-8">
+        <h1 class="text-2xl font-bold text-center mb-6 text-dark-accent">ServerPanel</h1>
+        <h2 class="text-lg text-center mb-6 text-dark-muted">Регистрация</h2>
+
+        {% if error %}
+        <div class="bg-red-900/30 border border-red-700 text-red-400 px-4 py-3 rounded mb-4 text-sm">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/register" class="space-y-4">
+            <div>
+                <label for="display_name" class="block text-sm text-dark-muted mb-1">Имя</label>
+                <input type="text" id="display_name" name="display_name"
+                       class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+            </div>
+            <div>
+                <label for="email" class="block text-sm text-dark-muted mb-1">Email</label>
+                <input type="email" id="email" name="email" required autofocus
+                       class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+            </div>
+            <div>
+                <label for="password" class="block text-sm text-dark-muted mb-1">Пароль (мин. 8 символов)</label>
+                <input type="password" id="password" name="password" required minlength="8"
+                       class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+            </div>
+            <button type="submit"
+                    class="w-full bg-dark-accent text-white rounded px-4 py-2 font-medium hover:bg-blue-600 transition-colors">
+                Создать аккаунт
+            </button>
+        </form>
+
+        <p class="text-center text-sm text-dark-muted mt-4">
+            Уже есть аккаунт? <a href="/login" class="text-dark-accent hover:underline">Войти</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

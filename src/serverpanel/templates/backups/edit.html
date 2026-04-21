@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Редактирование' if config else 'Новый бэкап' }} — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers" class="hover:text-dark-accent">Серверы</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}" class="hover:text-dark-accent">{{ server.name }}</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}/backups" class="hover:text-dark-accent">Backups</a>
+        <span>/</span>
+        <span class="text-dark-text">{{ config.name if config else 'new' }}</span>
+    </div>
+    <h2 class="text-2xl font-bold">{{ 'Редактирование бэкапа' if config else 'Новый бэкап' }}</h2>
+</div>
+
+<form method="post"
+      action="{{ '/servers/' ~ server.id ~ '/backups/' ~ config.id ~ '/edit' if config else '/servers/' ~ server.id ~ '/backups' }}"
+      class="space-y-6 max-w-4xl"
+      id="backup-form">
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Имя</label>
+        <input type="text" name="name" required value="{{ config.name if config else '' }}"
+               class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm">
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <label class="block text-xs text-dark-muted uppercase mb-1">Schedule</label>
+            <input type="text" name="schedule" placeholder="03:00 или weekly:Sun@04:00 или пусто"
+                   value="{{ config.schedule or '' if config else '' }}"
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm font-mono">
+            <p class="text-xs text-dark-muted mt-1">Формат: HH:MM (ежедневно) или weekly:DAY@HH:MM. Пусто — только ручной запуск.</p>
+        </div>
+        <div>
+            <label class="block text-xs text-dark-muted uppercase mb-1">Rotation days</label>
+            <input type="number" name="rotation_days" min="0" value="{{ config.rotation_days if config else 14 }}"
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm">
+        </div>
+    </div>
+
+    <!-- Builder UI (Alpine.js). Hidden inputs `sources`/`destinations` are serialized on submit. -->
+    <div id="plan-builder"
+         data-sources="{{ (config.sources | tojson) if config else '[]' }}"
+         data-destinations="{{ (config.destinations | tojson) if config else '[]' }}"
+         data-storages='[{% for s in storages %}{"id":{{ s.id }},"name":"{{ s.name }}","type":"{{ s.storage_type }}"}{% if not loop.last %},{% endif %}{% endfor %}]'>
+        <!-- sources -->
+        <div class="mb-6">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold text-dark-muted uppercase">Sources (что копировать)</h3>
+                <button type="button" data-add="source"
+                        class="text-xs px-2 py-1 rounded border border-dark-border hover:border-dark-accent">+ источник</button>
+            </div>
+            <div data-list="sources" class="space-y-2"></div>
+        </div>
+
+        <!-- destinations -->
+        <div class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold text-dark-muted uppercase">Destinations (куда писать)</h3>
+                <div class="flex gap-2">
+                    <button type="button" data-add="local"
+                            class="text-xs px-2 py-1 rounded border border-dark-border hover:border-dark-accent">+ local</button>
+                    <button type="button" data-add="storage"
+                            class="text-xs px-2 py-1 rounded border border-dark-border hover:border-dark-accent"
+                            {% if not storages %}disabled title="Нет StorageConfig — добавьте Storage Box"{% endif %}>
+                            + storage
+                    </button>
+                </div>
+            </div>
+            <div data-list="destinations" class="space-y-2"></div>
+        </div>
+
+        <details class="text-xs text-dark-muted">
+            <summary class="cursor-pointer hover:text-dark-text">Debug: raw JSON</summary>
+            <pre data-preview class="mt-2 bg-dark-bg border border-dark-border rounded p-2 overflow-auto"></pre>
+        </details>
+
+        <input type="hidden" name="sources">
+        <input type="hidden" name="destinations">
+    </div>
+
+    <div class="flex gap-2">
+        <button type="submit" class="px-4 py-2 bg-dark-accent/20 border border-dark-accent/50 text-dark-accent rounded hover:bg-dark-accent/30">
+            Сохранить
+        </button>
+        <a href="{{ '/servers/' ~ server.id ~ '/backups/' ~ config.id if config else '/servers/' ~ server.id ~ '/backups' }}"
+           class="px-4 py-2 bg-dark-bg border border-dark-border text-dark-muted rounded hover:text-dark-text">
+            Отмена
+        </a>
+    </div>
+</form>
+
+<script src="/static/js/backup_builder.js"></script>
+{% endblock %}

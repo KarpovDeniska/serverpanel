@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ get_csrf_token(request) }}">
+    <title>{% block title %}ServerPanel{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            bg: '#0f1117',
+                            card: '#161b22',
+                            border: '#30363d',
+                            text: '#e6edf3',
+                            muted: '#8b949e',
+                            accent: '#58a6ff',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body class="dark h-full bg-dark-bg text-dark-text">
+    {% if user is defined and user %}
+    <div class="flex h-full">
+        <!-- Sidebar -->
+        <aside class="w-56 bg-dark-card border-r border-dark-border flex flex-col">
+            <div class="p-4 border-b border-dark-border">
+                <h1 class="text-lg font-bold text-dark-accent">ServerPanel</h1>
+            </div>
+            <nav class="flex-1 p-2 space-y-1">
+                <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                    Dashboard
+                </a>
+                <a href="/servers" class="nav-link {% if '/servers' in request.url.path %}active{% endif %}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/></svg>
+                    Серверы
+                </a>
+                <a href="/settings" class="nav-link {% if '/settings' in request.url.path %}active{% endif %}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    Настройки
+                </a>
+            </nav>
+            <div class="p-4 border-t border-dark-border">
+                <div class="text-sm text-dark-muted mb-2">{{ user.display_name or user.email }}</div>
+                <a href="/logout" class="text-sm text-red-400 hover:text-red-300">Выйти</a>
+            </div>
+        </aside>
+
+        <!-- Main content -->
+        <main class="flex-1 overflow-auto">
+            <div class="p-6">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+    {% else %}
+    <main class="min-h-full flex items-center justify-center">
+        {% block content_public %}{% endblock %}
+    </main>
+    {% endif %}
+
+    <script>
+        // Auto-attach CSRF token to every HTMX request and every traditional form submit.
+        (function () {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            const token = meta ? meta.content : '';
+            if (!token) return;
+            document.body.addEventListener('htmx:configRequest', (event) => {
+                event.detail.headers['X-CSRF-Token'] = token;
+            });
+            document.querySelectorAll('form').forEach((form) => {
+                if (form.querySelector('input[name="csrf_token"]')) return;
+                const method = (form.getAttribute('method') || 'get').toLowerCase();
+                if (method === 'get') return;
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'csrf_token';
+                input.value = token;
+                form.appendChild(input);
+            });
+        })();
+    </script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

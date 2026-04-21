@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Настройки — ServerPanel{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h2 class="text-2xl font-bold">Настройки</h2>
+    <p class="text-dark-muted mt-1">Управление провайдерами и предпочтениями</p>
+</div>
+
+<!-- Provider configs -->
+<div class="mb-8">
+    <h3 class="text-lg font-semibold mb-4">Провайдеры</h3>
+    {% if providers %}
+    <div class="space-y-3">
+        {% for p in providers %}
+        <div class="bg-dark-card border border-dark-border rounded-lg p-4 flex items-center justify-between">
+            <div>
+                <div class="font-medium">{{ p.name }}</div>
+                <div class="text-sm text-dark-muted">{{ p.provider_type }}</div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs px-2 py-1 rounded {{ 'bg-green-900/30 text-green-400' if p.is_active else 'bg-red-900/30 text-red-400' }}">
+                    {{ 'Активен' if p.is_active else 'Отключён' }}
+                </span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-dark-muted">Нет подключённых провайдеров. <a href="/servers/add" class="text-dark-accent hover:underline">Добавить</a></p>
+    {% endif %}
+</div>
+
+<!-- User info -->
+<div>
+    <h3 class="text-lg font-semibold mb-4">Аккаунт</h3>
+    <div class="bg-dark-card border border-dark-border rounded-lg p-4">
+        <dl class="space-y-2 text-sm">
+            <div class="flex justify-between">
+                <dt class="text-dark-muted">Email</dt>
+                <dd>{{ user.email }}</dd>
+            </div>
+            <div class="flex justify-between">
+                <dt class="text-dark-muted">Роль</dt>
+                <dd>{{ user.role }}</dd>
+            </div>
+        </dl>
+    </div>
+</div>
+{% endblock %}

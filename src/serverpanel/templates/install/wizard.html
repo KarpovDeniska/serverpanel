@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+{% block title %}Установка ОС — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers" class="hover:text-dark-accent">Серверы</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}" class="hover:text-dark-accent">{{ server.name }}</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}/install" class="hover:text-dark-accent">Install</a>
+        <span>/</span>
+        <span class="text-dark-text">Новая установка</span>
+    </div>
+    <h2 class="text-2xl font-bold">Установка ОС</h2>
+    <p class="text-dark-muted mt-1">{{ server.name }} ({{ server.ip_address }})</p>
+</div>
+
+<!-- Step indicators -->
+<div class="flex items-center gap-2 mb-6">
+    <button onclick="goStep(1)" id="tab-1" class="step-tab active px-3 py-1.5 rounded text-sm font-medium bg-dark-accent text-white">1. Шаблон</button>
+    <div class="w-4 h-px bg-dark-border"></div>
+    <button onclick="goStep(2)" id="tab-2" class="step-tab px-3 py-1.5 rounded text-sm font-medium bg-dark-bg text-dark-muted border border-dark-border">2. ОС</button>
+    <div class="w-4 h-px bg-dark-border"></div>
+    <button onclick="goStep(3)" id="tab-3" class="step-tab px-3 py-1.5 rounded text-sm font-medium bg-dark-bg text-dark-muted border border-dark-border">3. ПО</button>
+    <div class="w-4 h-px bg-dark-border"></div>
+    <button onclick="goStep(4)" id="tab-4" class="step-tab px-3 py-1.5 rounded text-sm font-medium bg-dark-bg text-dark-muted border border-dark-border">4. Настройки</button>
+    <div class="w-4 h-px bg-dark-border"></div>
+    <button onclick="goStep(5)" id="tab-5" class="step-tab px-3 py-1.5 rounded text-sm font-medium bg-dark-bg text-dark-muted border border-dark-border">5. Обзор</button>
+</div>
+
+<form method="POST" action="/servers/{{ server.id }}/install/new" id="install-form">
+
+<!-- Step 1: Template Selection -->
+<div id="step-1" class="step-panel">
+    <h3 class="text-lg font-semibold mb-4">Выберите шаблон сервера</h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for tpl in server_templates %}
+        <label class="tpl-card cursor-pointer">
+            <input type="radio" name="template_id" value="{{ tpl.id }}"
+                   data-os="{{ tpl.recommended_os }}"
+                   data-software="{{ tpl.software_ids|join(',') }}"
+                   data-software-by-family='{{ tpl.software_by_family|tojson }}'
+                   data-ports="{{ tpl.default_ports|join(', ') }}"
+                   data-firewall="{{ tpl.firewall|lower }}"
+                   class="hidden" onchange="selectTemplate(this)">
+            <div class="bg-dark-card border-2 border-dark-border rounded-lg p-5 hover:border-dark-accent/50 transition-colors h-full">
+                <div class="flex items-start gap-4">
+                    <div class="text-3xl flex-shrink-0">
+                        {% if tpl.icon == 'shield' %}
+                        <svg class="w-10 h-10 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                        {% elif tpl.icon == 'cloud' %}
+                        <svg class="w-10 h-10 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+                        {% elif tpl.icon == 'building' %}
+                        <svg class="w-10 h-10 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                        {% elif tpl.icon == 'settings' %}
+                        <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                        {% endif %}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-semibold text-base">{{ tpl.name }}</div>
+                        <div class="text-sm text-dark-muted mt-0.5">{{ tpl.short_desc }}</div>
+                    </div>
+                </div>
+            </div>
+        </label>
+        {% endfor %}
+    </div>
+
+    <!-- Template description panel -->
+    <div id="tpl-details" class="hidden mt-5 bg-dark-card border border-dark-border rounded-lg p-5">
+        <h4 class="font-semibold text-sm text-dark-muted uppercase tracking-wide mb-3">Что будет установлено</h4>
+        <div id="tpl-description" class="text-sm text-dark-text leading-relaxed"></div>
+    </div>
+</div>
+
+<!-- Step 2: OS Selection -->
+<div id="step-2" class="step-panel hidden">
+    <h3 class="text-lg font-semibold mb-1">Выберите операционную систему</h3>
+    <p id="os-hint" class="text-sm text-dark-muted mb-4"></p>
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {% for img in os_images %}
+        <label class="os-card cursor-pointer">
+            <input type="radio" name="os_image_id" value="{{ img.id }}" data-family="{{ img.family }}" class="hidden" onchange="selectOS(this)">
+            <div class="bg-dark-card border-2 border-dark-border rounded-lg p-4 text-center hover:border-dark-accent/50 transition-colors">
+                <div class="text-3xl mb-2">
+                    {% if 'ubuntu' in img.id %}&#x1F7E0;{% elif 'debian' in img.id %}&#x1F534;{% elif 'rocky' in img.id %}&#x1F7E2;{% elif 'alma' in img.id %}&#x1F535;{% elif 'centos' in img.id %}&#x1F7E3;{% elif 'win' in img.id %}&#x1F7E6;{% else %}&#x26AB;{% endif %}
+                </div>
+                <div class="font-medium text-sm">{{ img.name }}</div>
+                <div class="text-xs text-dark-muted mt-1">{{ img.family }}</div>
+            </div>
+        </label>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Step 3: Software -->
+<div id="step-3" class="step-panel hidden">
+    <h3 class="text-lg font-semibold mb-1">Программное обеспечение</h3>
+    <p id="sw-hint" class="text-sm text-dark-muted mb-4">Выберите дополнительные компоненты или измените предустановленные</p>
+    <div class="space-y-6">
+        {% for cat_id, packages in software.items() %}
+        <div class="sw-category">
+            <h4 class="text-sm font-semibold text-dark-muted uppercase tracking-wide mb-2">{{ category_labels.get(cat_id, cat_id) }}</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                {% for pkg in packages %}
+                <label class="sw-item flex items-start gap-3 bg-dark-card border border-dark-border rounded-lg p-3 cursor-pointer hover:border-dark-accent/50 transition-colors"
+                       data-families="{{ pkg.install_commands.keys()|join(',') }}">
+                    <input type="checkbox" name="software_ids" value="{{ pkg.id }}" class="mt-0.5 rounded">
+                    <div>
+                        <div class="font-medium text-sm">{{ pkg.name }}</div>
+                        <div class="text-xs text-dark-muted">{{ pkg.description }}</div>
+                        {% if pkg.ports %}
+                        <div class="text-xs text-dark-muted mt-1">Порты: {{ pkg.ports|join(', ') }}</div>
+                        {% endif %}
+                    </div>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Step 4: Configuration -->
+<div id="step-4" class="step-panel hidden">
+    <h3 class="text-lg font-semibold mb-4">Настройки</h3>
+    <div class="max-w-xl space-y-4">
+        <div>
+            <label class="block text-sm text-dark-muted mb-1">Hostname</label>
+            <input type="text" name="hostname" value="{{ server.name | lower | replace(' ', '-') }}"
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text focus:outline-none focus:border-dark-accent">
+        </div>
+
+        <div>
+            <label class="block text-sm text-dark-muted mb-1">SSH ключ (публичный)</label>
+            {% if ssh_keys %}
+            <div class="space-y-1 mb-2">
+                {% for key in ssh_keys %}
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="ssh_key_fingerprints" value="{{ key.fingerprint }}" checked>
+                    <span class="font-mono text-xs">{{ key.name }} ({{ key.fingerprint[:16] }}...)</span>
+                </label>
+                {% endfor %}
+            </div>
+            {% endif %}
+            <textarea name="custom_ssh_key" rows="3" placeholder="ssh-ed25519 AAAA... (опционально)"
+                      class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text text-xs font-mono focus:outline-none focus:border-dark-accent"></textarea>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" name="enable_firewall" id="fw-toggle" checked onchange="toggleFirewall()">
+                <span class="text-sm">Включить файрвол</span>
+            </label>
+        </div>
+        <div id="fw-ports">
+            <label class="block text-sm text-dark-muted mb-1">Открытые порты (через запятую)</label>
+            <input type="text" name="open_ports" id="ports-input" value="22, 80, 443"
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-dark-text text-sm focus:outline-none focus:border-dark-accent">
+        </div>
+    </div>
+</div>
+
+<!-- Step 5: Review -->
+<div id="step-5" class="step-panel hidden">
+    <h3 class="text-lg font-semibold mb-4">Подтверждение установки</h3>
+    <div class="max-w-xl bg-dark-card border border-dark-border rounded-lg p-5 space-y-4">
+        <div class="flex justify-between text-sm">
+            <span class="text-dark-muted">Сервер</span>
+            <span>{{ server.name }} ({{ server.ip_address }})</span>
+        </div>
+        <div class="flex justify-between text-sm">
+            <span class="text-dark-muted">Шаблон</span>
+            <span id="review-template" class="font-medium">—</span>
+        </div>
+        <div class="flex justify-between text-sm">
+            <span class="text-dark-muted">ОС</span>
+            <span id="review-os" class="font-medium">—</span>
+        </div>
+        <div class="text-sm">
+            <span class="text-dark-muted">ПО:</span>
+            <span id="review-software" class="text-dark-muted">—</span>
+        </div>
+        <div class="flex justify-between text-sm">
+            <span class="text-dark-muted">Hostname</span>
+            <span id="review-hostname">—</span>
+        </div>
+        <div class="flex justify-between text-sm">
+            <span class="text-dark-muted">Файрвол</span>
+            <span id="review-firewall">—</span>
+        </div>
+
+        <div class="border-t border-dark-border pt-4">
+            <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-400 px-4 py-3 rounded text-sm mb-4">
+                Все данные на сервере будут уничтожены. Сервер будет перезагружен в rescue mode и переустановлен.
+            </div>
+            <button type="submit" onclick="return confirm('Вы уверены? ВСЕ ДАННЫЕ на сервере будут УДАЛЕНЫ.')"
+                    class="w-full bg-red-600 text-white rounded px-4 py-3 font-medium hover:bg-red-500 transition-colors">
+                Установить ОС
+            </button>
+        </div>
+    </div>
+</div>
+
+</form>
+
+<!-- Navigation -->
+<div class="flex justify-between mt-6">
+    <button id="btn-back" onclick="prevStep()" class="hidden px-4 py-2 text-sm bg-dark-bg border border-dark-border rounded text-dark-text hover:border-dark-accent transition-colors">
+        Назад
+    </button>
+    <div></div>
+    <button id="btn-next" onclick="nextStep()" class="px-4 py-2 text-sm bg-dark-accent text-white rounded hover:bg-blue-600 transition-colors">
+        Далее
+    </button>
+</div>
+
+<script>
+let currentStep = 1;
+const totalSteps = 5;
+let selectedTemplate = null;
+let currentSoftwareByFamily = {};
+
+const TEMPLATE_DESCRIPTIONS = {
+    {% for tpl in server_templates %}
+    "{{ tpl.id }}": `{{ tpl.description|safe }}`,
+    {% endfor %}
+};
+
+const TEMPLATE_NAMES = {
+    {% for tpl in server_templates %}
+    "{{ tpl.id }}": "{{ tpl.name }}",
+    {% endfor %}
+};
+
+function goStep(n) {
+    if (n <= currentStep || validateStep(currentStep)) {
+        showStep(n);
+    }
+}
+
+function nextStep() {
+    if (currentStep < totalSteps && validateStep(currentStep)) {
+        showStep(currentStep + 1);
+    }
+}
+
+function prevStep() {
+    if (currentStep > 1) showStep(currentStep - 1);
+}
+
+function showStep(n) {
+    currentStep = n;
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById('step-' + n).classList.remove('hidden');
+
+    document.querySelectorAll('.step-tab').forEach(t => {
+        t.className = 'step-tab px-3 py-1.5 rounded text-sm font-medium bg-dark-bg text-dark-muted border border-dark-border';
+    });
+    document.getElementById('tab-' + n).className = 'step-tab active px-3 py-1.5 rounded text-sm font-medium bg-dark-accent text-white';
+
+    document.getElementById('btn-back').classList.toggle('hidden', n === 1);
+    document.getElementById('btn-next').classList.toggle('hidden', n === totalSteps);
+
+    if (n === 5) updateReview();
+}
+
+function validateStep(n) {
+    if (n === 1) {
+        const tpl = document.querySelector('input[name="template_id"]:checked');
+        if (!tpl) { alert('Выберите шаблон сервера'); return false; }
+    }
+    if (n === 2) {
+        const os = document.querySelector('input[name="os_image_id"]:checked');
+        if (!os) { alert('Выберите операционную систему'); return false; }
+    }
+    return true;
+}
+
+function selectTemplate(radio) {
+    // Highlight card
+    document.querySelectorAll('.tpl-card div[class*="border-2"]').forEach(d => {
+        d.classList.remove('border-dark-accent');
+        d.classList.add('border-dark-border');
+    });
+    const card = radio.closest('.tpl-card').querySelector('div[class*="border-2"]');
+    card.classList.remove('border-dark-border');
+    card.classList.add('border-dark-accent');
+
+    selectedTemplate = radio.value;
+    const desc = TEMPLATE_DESCRIPTIONS[radio.value];
+    const detailsEl = document.getElementById('tpl-details');
+    const descEl = document.getElementById('tpl-description');
+
+    if (radio.value === 'custom') {
+        detailsEl.classList.add('hidden');
+    } else {
+        detailsEl.classList.remove('hidden');
+        descEl.innerHTML = desc;
+    }
+
+    // Parse per-family software overrides
+    try {
+        currentSoftwareByFamily = JSON.parse(radio.dataset.softwareByFamily || '{}');
+    } catch(e) {
+        currentSoftwareByFamily = {};
+    }
+
+    // Pre-select default software (will be overridden by family-specific on OS selection)
+    document.querySelectorAll('input[name="software_ids"]').forEach(cb => cb.checked = false);
+    const swIds = radio.dataset.software.split(',').filter(Boolean);
+    swIds.forEach(id => {
+        const cb = document.querySelector(`input[name="software_ids"][value="${id}"]`);
+        if (cb) cb.checked = true;
+    });
+
+    // Filter OS by compatible families
+    // If software_by_family exists, use union of its keys
+    let compatFamilies;
+    if (Object.keys(currentSoftwareByFamily).length > 0) {
+        compatFamilies = new Set(Object.keys(currentSoftwareByFamily));
+    } else {
+        compatFamilies = getCompatibleFamilies(swIds);
+    }
+    filterOSCards(compatFamilies);
+
+    // Pre-select OS if specified
+    const osId = radio.dataset.os;
+    if (osId) {
+        const osRadio = document.querySelector(`input[name="os_image_id"][value="${osId}"]`);
+        if (osRadio && !osRadio.closest('.os-card').classList.contains('hidden')) {
+            osRadio.checked = true;
+            selectOS(osRadio);
+        }
+        document.getElementById('os-hint').textContent = 'Рекомендуемая ОС выбрана автоматически. Вы можете изменить выбор.';
+    } else {
+        // Clear OS selection, let user pick
+        document.querySelectorAll('input[name="os_image_id"]').forEach(r => r.checked = false);
+        document.querySelectorAll('.os-card div[class*="border-2"]').forEach(d => {
+            d.classList.remove('border-dark-accent');
+            d.classList.add('border-dark-border');
+        });
+        if (compatFamilies) {
+            document.getElementById('os-hint').textContent = 'Доступные ОС ограничены выбранным шаблоном.';
+        } else {
+            document.getElementById('os-hint').textContent = '';
+        }
+    }
+
+    // Pre-fill ports
+    const ports = radio.dataset.ports;
+    if (ports) {
+        document.getElementById('ports-input').value = ports;
+    }
+}
+
+function getCompatibleFamilies(softwareIds) {
+    if (!softwareIds.length) return null; // null = all
+    let result = null;
+    softwareIds.forEach(id => {
+        const el = document.querySelector(`.sw-item input[value="${id}"]`);
+        if (el) {
+            const fams = new Set(el.closest('.sw-item').dataset.families.split(','));
+            if (result === null) {
+                result = fams;
+            } else {
+                result = new Set([...result].filter(f => fams.has(f)));
+            }
+        }
+    });
+    return result;
+}
+
+function filterOSCards(compatFamilies) {
+    document.querySelectorAll('.os-card').forEach(card => {
+        const radio = card.querySelector('input[name="os_image_id"]');
+        const family = radio.dataset.family;
+        const show = !compatFamilies || compatFamilies.has(family);
+        card.classList.toggle('hidden', !show);
+        if (!show && radio.checked) {
+            radio.checked = false;
+            // Remove highlight
+            card.querySelector('div[class*="border-2"]').classList.remove('border-dark-accent');
+            card.querySelector('div[class*="border-2"]').classList.add('border-dark-border');
+        }
+    });
+}
+
+function selectOS(radio) {
+    document.querySelectorAll('.os-card div[class*="border-2"]').forEach(d => {
+        d.classList.remove('border-dark-accent');
+        d.classList.add('border-dark-border');
+    });
+    const card = radio.closest('.os-card').querySelector('div[class*="border-2"]');
+    card.classList.remove('border-dark-border');
+    card.classList.add('border-dark-accent');
+
+    const family = radio.dataset.family;
+    filterSoftware(family);
+
+    // Apply per-family presets if template defines them
+    if (currentSoftwareByFamily && currentSoftwareByFamily[family]) {
+        document.querySelectorAll('input[name="software_ids"]').forEach(cb => cb.checked = false);
+        currentSoftwareByFamily[family].forEach(id => {
+            const cb = document.querySelector(`input[name="software_ids"][value="${id}"]`);
+            if (cb && !cb.closest('.sw-item').classList.contains('hidden')) {
+                cb.checked = true;
+            }
+        });
+    }
+}
+
+function filterSoftware(family) {
+    // Remember currently checked software
+    const checked = new Set([...document.querySelectorAll('input[name="software_ids"]:checked')].map(c => c.value));
+
+    document.querySelectorAll('.sw-item').forEach(el => {
+        const families = el.dataset.families.split(',');
+        const compatible = families.includes(family);
+        el.classList.toggle('hidden', !compatible);
+        // Uncheck incompatible, keep compatible checked
+        const cb = el.querySelector('input[type="checkbox"]');
+        if (!compatible) cb.checked = false;
+    });
+    // Hide empty categories
+    document.querySelectorAll('.sw-category').forEach(cat => {
+        const visible = cat.querySelectorAll('.sw-item:not(.hidden)').length;
+        cat.classList.toggle('hidden', visible === 0);
+    });
+}
+
+function toggleFirewall() {
+    document.getElementById('fw-ports').classList.toggle('hidden', !document.getElementById('fw-toggle').checked);
+}
+
+function updateReview() {
+    // Template
+    const tpl = document.querySelector('input[name="template_id"]:checked');
+    document.getElementById('review-template').textContent = tpl ? TEMPLATE_NAMES[tpl.value] : '—';
+
+    // OS
+    const os = document.querySelector('input[name="os_image_id"]:checked');
+    document.getElementById('review-os').textContent = os ? os.closest('.os-card').querySelector('.font-medium').textContent : '—';
+
+    // Software
+    const sw = [...document.querySelectorAll('input[name="software_ids"]:checked')].map(c =>
+        c.closest('label').querySelector('.font-medium').textContent
+    );
+    document.getElementById('review-software').textContent = sw.length ? sw.join(', ') : 'Нет';
+
+    document.getElementById('review-hostname').textContent = document.querySelector('input[name="hostname"]').value || '—';
+
+    const fw = document.getElementById('fw-toggle').checked;
+    const ports = document.getElementById('ports-input').value;
+    document.getElementById('review-firewall').textContent = fw ? 'Да (' + ports + ')' : 'Нет';
+}
+</script>
+{% endblock %}

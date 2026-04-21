@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Новое хранилище — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers" class="hover:text-dark-accent">Серверы</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}" class="hover:text-dark-accent">{{ server.name }}</a>
+        <span>/</span>
+        <span class="text-dark-text">Новое хранилище</span>
+    </div>
+    <h2 class="text-2xl font-bold">Новое хранилище</h2>
+</div>
+
+<form method="post" action="/servers/{{ server.id }}/storages/new" class="space-y-4 max-w-2xl">
+    <div>
+        <label class="block text-sm text-dark-muted mb-1">Тип</label>
+        <select name="storage_type" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border">
+            {% for st in storage_types %}
+            <option value="{{ st.type }}">{{ st.display_name }} — {{ st.description }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <label class="block text-sm text-dark-muted mb-1">Имя (для UI)</label>
+        <input type="text" name="name" required placeholder="sb-daily"
+               class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border">
+    </div>
+
+    <div class="grid grid-cols-3 gap-3">
+        <div class="col-span-2">
+            <label class="block text-sm text-dark-muted mb-1">Host</label>
+            <input type="text" name="host" required placeholder="u123456.your-storagebox.de"
+                   class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border">
+        </div>
+        <div>
+            <label class="block text-sm text-dark-muted mb-1">Port</label>
+            <input type="number" name="port" placeholder="23"
+                   class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border">
+        </div>
+    </div>
+
+    <div>
+        <label class="block text-sm text-dark-muted mb-1">User</label>
+        <input type="text" name="username" required placeholder="u123456"
+               class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border">
+    </div>
+
+    <div>
+        <label class="block text-sm text-dark-muted mb-1">
+            Приватный SSH-ключ (PEM)
+            <span class="text-xs">— оставьте пустым, чтобы использовать пароль</span>
+        </label>
+        <textarea name="private_key" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+                  class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border font-mono text-xs"></textarea>
+    </div>
+
+    <div>
+        <label class="block text-sm text-dark-muted mb-1">Или пароль</label>
+        <input type="password" name="password" autocomplete="new-password"
+               class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border">
+    </div>
+
+    <div>
+        <label class="block text-sm text-dark-muted mb-1">Base path</label>
+        <input type="text" name="base_path" value="/"
+               class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border">
+    </div>
+
+    <div class="flex gap-2 pt-2">
+        <button type="submit"
+                class="px-4 py-2 rounded bg-dark-accent text-white hover:opacity-90">
+            Сохранить
+        </button>
+        <a href="/servers/{{ server.id }}"
+           class="px-4 py-2 rounded border border-dark-border hover:border-dark-accent">
+            Отмена
+        </a>
+    </div>
+</form>
+{% endblock %}

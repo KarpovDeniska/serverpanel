@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Recovery {{ scenario }} — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers/{{ server.id }}/recovery" class="hover:text-dark-accent">Recovery</a>
+        <span>/</span>
+        <span class="text-dark-text">{{ scenario }}</span>
+    </div>
+    <h2 class="text-2xl font-bold">Восстановление: {{ scenario }}</h2>
+</div>
+
+<div class="mb-4 bg-red-900/20 border border-red-800 text-red-300 px-4 py-3 rounded text-sm">
+    {% if scenario == 'c_drive' %}
+    Сценарий перезапишет системный диск. Данные на C: будут потеряны, если бэкапа нет.
+    {% elif scenario == 'd_drive' %}
+    Требует работающей Windows с SSH-доступом. Новый диск D: будет инициализирован и заполнен из Storage Box.
+    {% else %}
+    Оба диска. Используется сценарий C + восстановление D: внутри restore.ps1.
+    {% endif %}
+</div>
+
+<form method="post" action="/servers/{{ server.id }}/recovery/new" class="space-y-4 max-w-3xl">
+    <input type="hidden" name="scenario" value="{{ scenario }}">
+
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Storage Box</label>
+        <select name="storage_config_id" required
+                class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm">
+            {% for s in storages %}
+            <option value="{{ s.id }}">{{ s.name }} ({{ s.storage_type }})</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Daily folder</label>
+        <input type="text" name="daily_folder" value="latest" placeholder="latest или 2026-04-20"
+               class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm font-mono">
+        <p class="text-xs text-dark-muted mt-1">Имя папки в backups/daily/. По умолчанию — latest (симлинк/копия последней).</p>
+    </div>
+
+    {% if scenario in ('c_drive', 'both') %}
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <label class="block text-xs text-dark-muted uppercase mb-1">Hostname</label>
+            <input type="text" name="hostname" required
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs text-dark-muted uppercase mb-1">Admin password</label>
+            <input type="password" name="admin_password" required
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm">
+        </div>
+    </div>
+
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Product key (optional)</label>
+        <input type="text" name="product_key" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+               class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm font-mono">
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <label class="block text-xs text-dark-muted uppercase mb-1">ISO remote path</label>
+            <input type="text" name="iso_remote_path" value="/backups/software/windows_server_2022.iso"
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-xs font-mono">
+        </div>
+        <div>
+            <label class="block text-xs text-dark-muted uppercase mb-1">BCD remote path</label>
+            <input type="text" name="bcd_remote_path" value="/backups/software/BCD"
+                   class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-xs font-mono">
+        </div>
+    </div>
+
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-2">Software (ставится restore.ps1 после переустановки Windows)</label>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+            {% for sw in ['1c_platform', '1c_thin_client', 'cryptopro', 'git', 'nodejs', 'python', 'xray', 'iis', 'winacme', 'wsl', 'office'] %}
+            <label class="flex items-center gap-2 bg-dark-bg border border-dark-border rounded px-3 py-2">
+                <input type="checkbox" name="sw_{{ sw }}" class="accent-dark-accent">
+                <span>{{ sw }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="flex gap-2 pt-4">
+        <button type="submit"
+                onclick="return confirm('Запустить восстановление? Это перепишет {{ 'диск C:' if scenario == 'c_drive' else 'диск D:' if scenario == 'd_drive' else 'оба диска' }}.')"
+                class="px-4 py-2 bg-red-900/30 border border-red-800 text-red-300 rounded hover:bg-red-900/50">
+            Запустить восстановление
+        </button>
+        <a href="/servers/{{ server.id }}/recovery"
+           class="px-4 py-2 bg-dark-bg border border-dark-border text-dark-muted rounded hover:text-dark-text">
+            Отмена
+        </a>
+    </div>
+</form>
+{% endblock %}

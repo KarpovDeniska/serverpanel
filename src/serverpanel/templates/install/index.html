@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Install OS — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers" class="hover:text-dark-accent">Серверы</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}" class="hover:text-dark-accent">{{ server.name }}</a>
+        <span>/</span>
+        <span class="text-dark-text">Install OS</span>
+    </div>
+    <div class="flex items-center justify-between">
+        <h2 class="text-2xl font-bold">Установка ОС</h2>
+        <a href="/servers/{{ server.id }}/install/new"
+           class="bg-dark-accent text-white rounded px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+            Новая установка
+        </a>
+    </div>
+</div>
+
+{% if history %}
+<div class="bg-dark-card border border-dark-border rounded-lg overflow-hidden">
+    <table class="w-full text-sm">
+        <thead class="bg-dark-bg">
+            <tr>
+                <th class="text-left px-4 py-2 text-dark-muted font-medium">#</th>
+                <th class="text-left px-4 py-2 text-dark-muted font-medium">ОС</th>
+                <th class="text-left px-4 py-2 text-dark-muted font-medium">Дата</th>
+                <th class="text-left px-4 py-2 text-dark-muted font-medium">Статус</th>
+                <th class="px-4 py-2"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-dark-border">
+            {% for run in history %}
+            <tr>
+                <td class="px-4 py-2 font-mono text-xs">#{{ run.id }}</td>
+                <td class="px-4 py-2">{{ run.config.get('os_image_name', '—') }}</td>
+                <td class="px-4 py-2 text-dark-muted">{{ run.started_at.strftime('%d.%m.%Y %H:%M') if run.started_at else '—' }}</td>
+                <td class="px-4 py-2">
+                    {% if run.status == 'running' %}
+                    <span class="text-yellow-400">{{ run.progress }}% — {{ run.current_step }}</span>
+                    {% elif run.status == 'success' %}
+                    <span class="text-green-400">Завершено</span>
+                    {% elif run.status == 'failed' %}
+                    <span class="text-red-400">Ошибка</span>
+                    {% else %}
+                    <span class="text-dark-muted">{{ run.status }}</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2 text-right">
+                    <a href="/servers/{{ server.id }}/install/progress/{{ run.id }}"
+                       class="text-dark-accent hover:underline text-xs">
+                        {% if run.status == 'running' %}Прогресс{% else %}Логи{% endif %}
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="bg-dark-card border border-dark-border rounded-lg p-8 text-center">
+    <p class="text-dark-muted mb-4">Установок ещё не было</p>
+    <a href="/servers/{{ server.id }}/install/new"
+       class="inline-block bg-dark-accent text-white rounded px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+        Установить ОС
+    </a>
+</div>
+{% endif %}
+{% endblock %}

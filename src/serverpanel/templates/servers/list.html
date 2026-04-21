@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Серверы — ServerPanel{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <h2 class="text-2xl font-bold">Серверы</h2>
+        <p class="text-dark-muted mt-1">Управление серверами</p>
+    </div>
+    <a href="/servers/add"
+       class="bg-dark-accent text-white rounded px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+        + Добавить
+    </a>
+</div>
+
+{% if servers %}
+<div class="bg-dark-card border border-dark-border rounded-lg overflow-hidden">
+    <table class="w-full">
+        <thead>
+            <tr class="border-b border-dark-border text-sm text-dark-muted">
+                <th class="text-left px-4 py-3 font-medium">Имя</th>
+                <th class="text-left px-4 py-3 font-medium">IP</th>
+                <th class="text-left px-4 py-3 font-medium">Провайдер</th>
+                <th class="text-left px-4 py-3 font-medium">OS</th>
+                <th class="text-left px-4 py-3 font-medium">Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for server in servers %}
+            <tr class="border-b border-dark-border hover:bg-dark-bg/50 cursor-pointer"
+                onclick="location.href='/servers/{{ server.id }}'">
+                <td class="px-4 py-3 font-medium">{{ server.name }}</td>
+                <td class="px-4 py-3 text-sm text-dark-muted">{{ server.ip_address or '—' }}</td>
+                <td class="px-4 py-3 text-sm">{{ server.provider_config.name if server.provider_config else '—' }}</td>
+                <td class="px-4 py-3 text-sm text-dark-muted">{{ server.os_type or '—' }}</td>
+                <td class="px-4 py-3">
+                    <span class="inline-block w-2 h-2 rounded-full bg-dark-muted"></span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="bg-dark-card border border-dark-border rounded-lg p-8 text-center">
+    <p class="text-dark-muted mb-4">Серверы не добавлены. Добавьте провайдер для начала.</p>
+    <a href="/servers/add"
+       class="inline-block bg-dark-accent text-white rounded px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+        Добавить провайдер
+    </a>
+</div>
+{% endif %}
+{% endblock %}

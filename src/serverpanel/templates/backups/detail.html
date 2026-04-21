@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ config.name }} — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers" class="hover:text-dark-accent">Серверы</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}" class="hover:text-dark-accent">{{ server.name }}</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}/backups" class="hover:text-dark-accent">Backups</a>
+        <span>/</span>
+        <span class="text-dark-text">{{ config.name }}</span>
+    </div>
+    <h2 class="text-2xl font-bold">{{ config.name }}</h2>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div class="bg-dark-card border border-dark-border rounded-lg p-5 lg:col-span-1">
+        <h3 class="font-semibold mb-3 text-dark-muted text-sm uppercase tracking-wide">Конфиг</h3>
+        <dl class="text-sm space-y-2">
+            <div class="flex justify-between"><dt class="text-dark-muted">Schedule:</dt><dd class="font-mono">{{ config.schedule or '—' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-dark-muted">Rotation:</dt><dd>{{ config.rotation_days }} д</dd></div>
+            <div class="flex justify-between"><dt class="text-dark-muted">Sources:</dt><dd>{{ (config.sources or [])|length }}</dd></div>
+            <div class="flex justify-between"><dt class="text-dark-muted">Destinations:</dt><dd>{{ (config.destinations or [])|length }}</dd></div>
+        </dl>
+
+        <div class="mt-5 pt-4 border-t border-dark-border space-y-2">
+            <form method="post" action="/servers/{{ server.id }}/backups/{{ config.id }}/run">
+                <button class="w-full px-3 py-2 bg-green-900/30 border border-green-700 text-green-400 rounded hover:bg-green-900/50 text-sm">
+                    ▶ Run now
+                </button>
+            </form>
+            {% if config.schedule %}
+            <form method="post" action="/servers/{{ server.id }}/backups/{{ config.id }}/install">
+                <button class="w-full px-3 py-2 bg-dark-accent/20 border border-dark-accent/50 text-dark-accent rounded hover:bg-dark-accent/30 text-sm">
+                    ⟲ Install schedule on server
+                </button>
+            </form>
+            <form method="post" action="/servers/{{ server.id }}/backups/{{ config.id }}/uninstall">
+                <button class="w-full px-3 py-2 bg-dark-bg border border-dark-border text-dark-muted rounded hover:text-dark-text text-sm">
+                    × Uninstall schedule
+                </button>
+            </form>
+            {% endif %}
+            <a href="/servers/{{ server.id }}/backups/{{ config.id }}/edit"
+               class="block text-center w-full px-3 py-2 bg-dark-bg border border-dark-border text-dark-muted rounded hover:text-dark-text text-sm">
+                Edit
+            </a>
+            <form method="post" action="/servers/{{ server.id }}/backups/{{ config.id }}/delete"
+                  onsubmit="return confirm('Удалить конфиг бэкапа и снять Task Scheduler?')">
+                <button class="w-full px-3 py-2 bg-red-900/20 border border-red-900 text-red-400 rounded hover:bg-red-900/40 text-sm">
+                    Delete
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="bg-dark-card border border-dark-border rounded-lg p-5 lg:col-span-2">
+        <h3 class="font-semibold mb-3 text-dark-muted text-sm uppercase tracking-wide">История запусков</h3>
+        {% if history %}
+        <table class="w-full text-sm">
+            <thead class="text-xs text-dark-muted uppercase">
+                <tr>
+                    <th class="text-left pb-2">ID</th>
+                    <th class="text-left pb-2">Статус</th>
+                    <th class="text-left pb-2">Размер</th>
+                    <th class="text-left pb-2">Начало</th>
+                    <th class="text-left pb-2">Длит.</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in history %}
+                <tr class="border-t border-dark-border">
+                    <td class="py-2 font-mono text-xs">#{{ h.id }}</td>
+                    <td class="py-2">
+                        {% set color = {'success': 'text-green-400', 'partial': 'text-yellow-400', 'failed': 'text-red-400', 'running': 'text-blue-400'}.get(h.status, 'text-dark-muted') %}
+                        <span class="{{ color }}">{{ h.status }}</span>
+                    </td>
+                    <td class="py-2 text-xs">{% if h.size_bytes %}{{ (h.size_bytes / 1024 / 1024)|round(1) }} MB{% else %}—{% endif %}</td>
+                    <td class="py-2 text-xs">{{ h.started_at.strftime('%d.%m %H:%M') if h.started_at else '—' }}</td>
+                    <td class="py-2 text-xs">
+                        {% if h.started_at and h.completed_at %}
+                            {{ ((h.completed_at - h.started_at).total_seconds() | int) }}s
+                        {% else %}—{% endif %}
+                    </td>
+                    <td class="py-2 text-right">
+                        <a href="/servers/{{ server.id }}/backups/{{ config.id }}/runs/{{ h.id }}" class="text-dark-accent hover:underline text-xs">open →</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-dark-muted text-sm">Пока пусто. Жми «Run now» чтобы запустить первый бэкап.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

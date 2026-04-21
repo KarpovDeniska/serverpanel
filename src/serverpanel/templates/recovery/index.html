@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Восстановление — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers" class="hover:text-dark-accent">Серверы</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}" class="hover:text-dark-accent">{{ server.name }}</a>
+        <span>/</span>
+        <span class="text-dark-text">Recovery</span>
+    </div>
+    <h2 class="text-2xl font-bold mb-4">Восстановление</h2>
+    <div class="bg-yellow-900/20 border border-yellow-800 text-yellow-300 px-4 py-3 rounded text-sm">
+        Операции ниже переводят сервер в Rescue Mode и перезаписывают диски. Используй только при реальном отказе.
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+    <a href="/servers/{{ server.id }}/recovery/new?scenario=c_drive"
+       class="block bg-dark-card border border-dark-border rounded-lg p-5 hover:border-dark-accent">
+        <h3 class="font-semibold text-red-400 mb-2">C-drive</h3>
+        <p class="text-sm text-dark-muted">Системный диск умер. Rescue → переустановка Windows из WIM → restore.ps1 из Storage Box.</p>
+    </a>
+    <a href="/servers/{{ server.id }}/recovery/new?scenario=d_drive"
+       class="block bg-dark-card border border-dark-border rounded-lg p-5 hover:border-dark-accent">
+        <h3 class="font-semibold text-orange-400 mb-2">D-drive</h3>
+        <p class="text-sm text-dark-muted">Диск данных умер. SSH к живой Windows → Initialize-Disk → restore_data.ps1.</p>
+    </a>
+    <a href="/servers/{{ server.id }}/recovery/new?scenario=both"
+       class="block bg-dark-card border border-dark-border rounded-lg p-5 hover:border-dark-accent">
+        <h3 class="font-semibold text-red-500 mb-2">Both drives</h3>
+        <p class="text-sm text-dark-muted">Оба диска. Сценарий C с флагом recover_d_drive = true.</p>
+    </a>
+</div>
+
+<div class="bg-dark-card border border-dark-border rounded-lg p-5">
+    <h3 class="font-semibold mb-3 text-dark-muted text-sm uppercase tracking-wide">История</h3>
+    {% if history %}
+    <table class="w-full text-sm">
+        <thead class="text-xs text-dark-muted uppercase">
+            <tr>
+                <th class="text-left pb-2">ID</th>
+                <th class="text-left pb-2">Сценарий</th>
+                <th class="text-left pb-2">Статус</th>
+                <th class="text-left pb-2">Прогресс</th>
+                <th class="text-left pb-2">Начало</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for h in history %}
+            <tr class="border-t border-dark-border">
+                <td class="py-2 font-mono text-xs">#{{ h.id }}</td>
+                <td class="py-2">{{ h.scenario }}</td>
+                <td class="py-2">
+                    {% set color = {'success': 'text-green-400', 'running': 'text-blue-400', 'failed': 'text-red-400'}.get(h.status, 'text-dark-muted') %}
+                    <span class="{{ color }}">{{ h.status }}</span>
+                </td>
+                <td class="py-2 text-xs">{{ h.progress }}%</td>
+                <td class="py-2 text-xs">{{ h.started_at.strftime('%d.%m %H:%M') if h.started_at else '—' }}</td>
+                <td class="py-2 text-right">
+                    <a href="/servers/{{ server.id }}/recovery/{{ h.id }}" class="text-dark-accent hover:underline text-xs">open →</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="text-dark-muted text-sm">Пусто.</div>
+    {% endif %}
+</div>
+{% endblock %}

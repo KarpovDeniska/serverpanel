@@ -1,0 +1,39 @@
+<div class="space-y-3 text-sm">
+    <!-- Online status -->
+    <div class="flex items-center gap-2">
+        {% if status.online %}
+        <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+        <span class="text-green-400">Online</span>
+        {% else %}
+        <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+        <span class="text-red-400">Offline</span>
+        {% endif %}
+    </div>
+
+    <!-- API Status -->
+    <div class="flex justify-between">
+        <span class="text-dark-muted">API статус</span>
+        <span>{{ status.api_status }}</span>
+    </div>
+
+    <!-- Rescue mode -->
+    {% if status.is_rescue %}
+    <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-400 px-3 py-2 rounded text-xs">
+        Rescue Mode активен
+    </div>
+    {% endif %}
+
+    <!-- Ports -->
+    {% if status.ports %}
+    <div>
+        <span class="text-dark-muted block mb-1">Порты:</span>
+        <div class="flex flex-wrap gap-1">
+            {% for port, open in status.ports.items() %}
+            <span class="px-2 py-0.5 rounded text-xs {{ 'bg-green-900/30 text-green-400' if open else 'bg-dark-bg text-dark-muted' }}">
+                {{ port }}
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
