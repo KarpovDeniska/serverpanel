@@ -17,7 +17,12 @@ $stagingRoot = Join-Path $env:ProgramData "serverpanel\staging\$runId"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 function Log($msg) {
-    Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] $msg"
+    # Write straight to stdout + flush: Write-Host under sshd can sit in the
+    # host's write buffer and never reach paramiko until the process exits,
+    # which looks exactly like "backup hangs mid-run" in the UI.
+    $line = "[$((Get-Date).ToString('HH:mm:ss'))] $msg"
+    [Console]::Out.WriteLine($line)
+    [Console]::Out.Flush()
 }
 
 function Write-Utf8($path, $text) {
@@ -296,6 +301,7 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
 
         $remoteBase = ($dest.base_path -replace '\\', '/').TrimEnd('/')
         $remoteRoot = if ($dest.date_folder) { "$remoteBase/$today" } else { $remoteBase }
+        Log "storage[$($dest.index)] target ${sbUser}@${sbHost}:${sbPort} -> $remoteRoot"
 
         # Create remote dir tree (mkdir per segment - sftp ignores "already exists")
         $parts = $remoteRoot.Trim('/').Split('/')
@@ -305,7 +311,9 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
             $cur = if ($cur) { "$cur/$p" } else { $p }
             $mkdirBatch += "-mkdir $cur`n"
         }
+        Log "storage[$($dest.index)] sftp mkdir tree..."
         & $RunSftpBatch $mkdirBatch | Out-Null
+        Log "storage[$($dest.index)] sftp mkdir done"
 
         # Same inherited-stdio problem applies to scp — wrap it in Start-Process.
         $RunScp = {
@@ -336,10 +344,12 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
                 continue
             }
             try {
+                Log "storage[$($dest.index)] $alias staging (type=$($src.type), path=$($src.path))..."
                 $staged = Stage-Source $src $stageBase
                 $leaf = Split-Path $staged -Leaf
                 $remoteTarget = "$remoteRoot/$leaf"
                 $sz = Get-PathSize $staged
+                Log "storage[$($dest.index)] $alias staged ($([math]::Round($sz/1MB,1)) MB) -> scp to $remoteTarget"
 
                 $isDir = (Get-Item -LiteralPath $staged).PSIsContainer
                 $scpExit = & $RunScp $staged $remoteTarget $isDir
@@ -401,11 +411,13 @@ Log "sources: $($plan.sources.Count), destinations: $($plan.destinations.Count),
 $sourcesByAlias = @{}
 foreach ($s in $plan.sources) { $sourcesByAlias[$s.alias] = $s }
 
+Log "staging root: $stagingRoot"
 Ensure-Dir $stagingRoot
 
 $results = @()
 foreach ($dest in $plan.destinations) {
     $rec = $null
+    Log "destination[$($dest.index)] kind=$($dest.kind) starting"
     try {
         if ($dest.kind -eq "local") {
             $rec = Invoke-LocalDestination $dest $sourcesByAlias $plan.date_folder
@@ -418,6 +430,7 @@ foreach ($dest in $plan.destinations) {
         $rec = @{ index = $dest.index; kind = $dest.kind; status = "failed"; error = "$_"; items = @(); size_bytes = 0 }
         Log "destination[$($dest.index)] fatal: $_"
     }
+    Log "destination[$($dest.index)] done status=$($rec.status)"
     $results += $rec
 }
 
