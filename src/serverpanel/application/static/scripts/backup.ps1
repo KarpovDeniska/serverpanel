@@ -531,16 +531,23 @@ if ($plan.PSObject.Properties.Name -contains 'notifications' -and $plan.notifica
     }
 }
 
-# Only alert on non-success — successful backups are silent to avoid notification fatigue.
-if ($tg -and $tg.bot_token -and $tg.chat_id -and $overall -ne "success") {
+# Always send a status message — "silent on success" means silence is
+# indistinguishable from "server died a month ago and nobody noticed".
+# A daily ✅ becomes a heartbeat; its absence is itself the alert.
+if ($tg -and $tg.bot_token -and $tg.chat_id) {
     try {
         $totalMb = [math]::Round((($results | Measure-Object -Property size_bytes -Sum).Sum) / 1MB, 1)
-        $icon = if ($overall -eq "failed") { "❌" } else { "⚠️" }
+        $icon = switch ($overall) {
+            "success" { "✅" }
+            "partial" { "⚠️" }
+            default   { "❌" }
+        }
         $lines = @(
             "$icon Backup <b>$overall</b>: $($plan.config_name)"
             "Host: $env:COMPUTERNAME | Run: $runId"
             "Destinations: ok=$okCount failed=$failedCount partial=$partialAny | Size: ${totalMb} MB"
         )
+        # Detail failing destinations only (success list can be long and noisy).
         foreach ($r in $results) {
             if ($r.status -ne "success") {
                 $err = if ($r.error) { $r.error } else { "(no error message)" }
