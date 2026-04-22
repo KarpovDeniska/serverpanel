@@ -38,6 +38,61 @@ def _get_provider_for_server(server: Server):
     return create_provider(server.provider_config.provider_type, credentials)
 
 
+async def _compute_backup_summary(db: AsyncSession, server_id: int) -> dict:
+    """Aggregate backup health for one server: last-run status per config,
+    counts per status, most recent run across all configs. Used by the
+    server detail page card and by the dashboard overview.
+    """
+    from sqlalchemy import func, select as _select
+    from serverpanel.infrastructure.database.models import (
+        BackupConfig as _BC, BackupHistory as _BH,
+    )
+
+    cfgs = (await db.execute(
+        _select(_BC.id, _BC.name).where(_BC.server_id == server_id)
+    )).all()
+    if not cfgs:
+        return {"configs_count": 0, "counts": {}, "latest": None, "per_config": []}
+
+    cfg_ids = [c.id for c in cfgs]
+    cfg_name_by_id = {c.id: c.name for c in cfgs}
+
+    latest_ids_subq = (
+        _select(func.max(_BH.id))
+        .where(_BH.backup_config_id.in_(cfg_ids))
+        .group_by(_BH.backup_config_id)
+    )
+    rows = (await db.execute(
+        _select(_BH).where(_BH.id.in_(latest_ids_subq))
+    )).scalars().all()
+    latest_by_config = {r.backup_config_id: r for r in rows}
+
+    counts = {"success": 0, "partial": 0, "failed": 0, "running": 0, "pending": 0, "never": 0}
+    per_config = []
+    for cid in cfg_ids:
+        h = latest_by_config.get(cid)
+        if h is None:
+            counts["never"] += 1
+            per_config.append({"config_id": cid, "config_name": cfg_name_by_id[cid],
+                               "status": "never", "started_at": None})
+            continue
+        st = h.status.value if hasattr(h.status, "value") else str(h.status)
+        counts[st] = counts.get(st, 0) + 1
+        per_config.append({"config_id": cid, "config_name": cfg_name_by_id[cid],
+                           "status": st, "started_at": h.started_at})
+
+    # Most recent run across all configs (by started_at, ignoring never/pending).
+    dated = [p for p in per_config if p["started_at"]]
+    latest = max(dated, key=lambda p: p["started_at"]) if dated else None
+
+    return {
+        "configs_count": len(cfg_ids),
+        "counts": counts,
+        "latest": latest,
+        "per_config": per_config,
+    }
+
+
 async def _check_port(ip: str, port: int, timeout: float = 3.0) -> bool:
     """Check if a TCP port is open (async)."""
     loop = asyncio.get_event_loop()
@@ -313,12 +368,14 @@ async def server_detail(
         StorageConfigRepository,
     )
     storages = await StorageConfigRepository(db).list_for_server(server.id)
+    backup_summary = await _compute_backup_summary(db, server.id)
 
     return templates.TemplateResponse(request, "servers/detail.html", {
         "user": user,
         "server": server,
         "capabilities": capabilities,
         "storages": storages,
+        "backup_summary": backup_summary,
     })
 
 

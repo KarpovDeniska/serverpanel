@@ -173,10 +173,53 @@
     </div>
 
     <!-- Backups -->
+    {% set bs = backup_summary %}
+    {% set bs_counts = bs.counts if bs else {} %}
+    {# Dominant indicator colour: red if anything failed, yellow if partial
+       or unfinished state, green if all healthy and at least once run. #}
+    {% if not bs or bs.configs_count == 0 %}
+      {% set card_border = "border-dark-border hover:border-dark-accent" %}
+      {% set dot_color = "bg-dark-muted" %}
+    {% elif bs_counts.get('failed', 0) > 0 %}
+      {% set card_border = "border-red-700" %}
+      {% set dot_color = "bg-red-500" %}
+    {% elif bs_counts.get('partial', 0) > 0 or bs_counts.get('never', 0) > 0 or bs_counts.get('pending', 0) > 0 %}
+      {% set card_border = "border-yellow-700" %}
+      {% set dot_color = "bg-yellow-500" %}
+    {% elif bs_counts.get('running', 0) > 0 %}
+      {% set card_border = "border-blue-700" %}
+      {% set dot_color = "bg-blue-500 animate-pulse" %}
+    {% else %}
+      {% set card_border = "border-green-800" %}
+      {% set dot_color = "bg-green-500" %}
+    {% endif %}
     <a href="/servers/{{ server.id }}/backups"
-       class="bg-dark-card border border-dark-border rounded-lg p-5 hover:border-dark-accent transition-colors">
-        <h3 class="font-semibold mb-2 text-dark-muted text-sm uppercase tracking-wide">Бэкапы</h3>
-        <p class="text-sm text-dark-muted">Настройка и запуск бэкапов.</p>
+       class="bg-dark-card border rounded-lg p-5 hover:border-dark-accent transition-colors {{ card_border }}">
+        <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold text-dark-muted text-sm uppercase tracking-wide">Бэкапы</h3>
+            <span class="w-2.5 h-2.5 rounded-full {{ dot_color }}"></span>
+        </div>
+        {% if not bs or bs.configs_count == 0 %}
+        <p class="text-sm text-dark-muted">Ничего не настроено. Кликни чтобы создать первый.</p>
+        {% else %}
+        <div class="text-xs space-y-1">
+            <div class="text-dark-text">{{ bs.configs_count }} конфиг(ов)</div>
+            <div class="flex flex-wrap gap-2 text-xs">
+                {% if bs_counts.get('success', 0) %}<span class="text-green-400">✓ {{ bs_counts['success'] }}</span>{% endif %}
+                {% if bs_counts.get('partial', 0) %}<span class="text-yellow-400">⚠ {{ bs_counts['partial'] }}</span>{% endif %}
+                {% if bs_counts.get('failed',  0) %}<span class="text-red-400">✕ {{ bs_counts['failed'] }}</span>{% endif %}
+                {% if bs_counts.get('running', 0) %}<span class="text-blue-400">⟳ {{ bs_counts['running'] }}</span>{% endif %}
+                {% if bs_counts.get('never',   0) %}<span class="text-dark-muted">— {{ bs_counts['never'] }} без прогонов</span>{% endif %}
+            </div>
+            {% if bs.latest %}
+            <div class="text-dark-muted pt-1 border-t border-dark-border/50">
+                Последний: <span class="font-mono">{{ bs.latest.config_name }}</span>
+                · {{ bs.latest.started_at.strftime('%d.%m %H:%M') }}
+                · <span class="{% if bs.latest.status == 'success' %}text-green-400{% elif bs.latest.status == 'partial' %}text-yellow-400{% elif bs.latest.status == 'failed' %}text-red-400{% else %}text-dark-muted{% endif %}">{{ bs.latest.status }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
     </a>
 
     <!-- Recovery -->
