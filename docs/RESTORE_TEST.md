@@ -18,31 +18,52 @@
 
 **НЕ тестируем на проде.** Все действия — на тестовой Windows-машине (VM / второй сервер / ноут с 1С-платформой).
 
+## Где тестируем
+
+Отдельной Windows-машины с 1С нет, поэтому тестируем **на том же hetzner-windows, но в отдельной папке**, не трогая прод `D:\1С\БД\UNF`. Файловая 1С-БД спокойно живёт в произвольном месте — 1cestart позволит держать обе ibase (прод + тестовую) в списке одновременно, чётко по именам.
+
+**Правила безопасности:**
+- Никогда не распаковывать в `D:\1С\БД\*` — только в `C:\restore_test\`.
+- В 1cestart давать тестовой ibase имя типа `UNF-RESTORE-TEST-YYYY-MM-DD` — путать нельзя.
+- Желательно: выбирать время, когда прод-1С не используется (после рабочего дня), чтобы избежать двойной работы с лицензионным сервером / Рутокеном.
+- По окончании теста — **удалить тестовую ibase из 1cestart** и снести `C:\restore_test\` (см. §7).
+
 ## Что нужно
 
-- Тестовая Windows-машина с установленной 1С платформой 8.3 (версия ≥ той что на hetzner-windows).
-- SSH-ключ к Storage Box (тот же что в `serverpanel` для этого сервера).
-- `sftp.exe` / `scp.exe` (OpenSSH Client — есть в Windows 10/11/Server 2019+ из коробки).
-- Свободное место: ~2× от размера UNF.zip (сейчас ~3 GB для extract + ~1.5 GB для самого zip).
+- Доступ к hetzner-windows по RDP (уже есть).
+- SSH-ключ к Storage Box в `~/.ssh/serverpanel-seed/hetzner-storage...ed25519` на маке (или такой же на сервере — проще залить). Если нет — см. §0.
+- `sftp.exe` / `scp.exe` — есть в Windows Server 2022 из коробки.
+- Свободное место на `C:\`: ~2× от размера UNF.zip (сейчас ~3 GB для extract + ~1.5 GB для самого zip).
+
+## 0. Подготовка SSH-ключа к SB на сервере (один раз)
+
+Если ключа к Storage Box ещё нет на сервере — залить с мака:
+
+```bash
+# на маке
+scp ~/.ssh/serverpanel-seed/<имя-файла-SB-ключа> Administrator@<IP-сервера>:C:/Users/Administrator/.ssh/storagebox_ed25519
+```
+
+В RDP на сервере проверить что файл на месте и права корректные (`icacls C:\Users\Administrator\.ssh\storagebox_ed25519 /inheritance:r /grant:r "Administrator:F"`).
 
 ## Чеклист
 
 ### 1. Скачать последний архив UNF с Storage Box
 
-На тестовой машине в PowerShell:
+На **hetzner-windows** (по RDP) в PowerShell:
 
 ```powershell
 $sbUser = "u571198"
 $sbHost = "u571198.your-storagebox.de"
 $sbPort = 23
-$sbKey  = "$env:USERPROFILE\.ssh\id_ed25519"  # подставить свой путь к ключу
-$today  = (Get-Date).ToString("yyyy-MM-dd")    # или дата которую тестируем
+$sbKey  = "$env:USERPROFILE\.ssh\storagebox_ed25519"  # см. §0
+$today  = (Get-Date).ToString("yyyy-MM-dd")           # или дата которую тестируем
 
 # список доступных daily-дат
 "ls backups/daily/" | sftp -P $sbPort -i $sbKey -o BatchMode=yes "${sbUser}@${sbHost}"
 
 # скачать UNF за выбранную дату
-mkdir C:\restore_test -Force | Out-Null
+New-Item -ItemType Directory -Force -Path C:\restore_test | Out-Null
 scp -P $sbPort -i $sbKey "${sbUser}@${sbHost}:backups/daily/$today/UNF.zip" C:\restore_test\UNF.zip
 ```
 
@@ -59,9 +80,9 @@ Get-ChildItem C:\restore_test\UNF | Select Name, @{N='MB';E={[math]::Round($_.Le
 
 ### 3. Зарегистрировать информационную базу в 1С
 
-Запустить **1cestart.exe**, кнопка «Добавить» → «Добавление в список существующей информационной базы» → указать `C:\restore_test\UNF`.
+Запустить **1cestart.exe**, кнопка «Добавить» → «Добавление в список существующей информационной базы» → указать `C:\restore_test\UNF`. **Имя задать**: `UNF-RESTORE-TEST-<YYYY-MM-DD>` где дата — из какого бэкапа тестировал. Это важно чтобы не путать с боевой базой.
 
-**Проверка**: база появилась в списке.
+**Проверка**: база появилась в списке. Рядом должна быть рабочая `UNF` (или как она у тебя называется).
 
 ### 4. Открыть в 1С
 
@@ -88,13 +109,21 @@ Get-ChildItem C:\restore_test\tools_xray
 
 **Проверка**: есть `xray.exe` + `config_xhttp.json` + `WinSW.xml`. Можно попробовать `.\xray.exe version` — должно напечатать версию.
 
-### 7. Почистить тестовую машину
+### 7. Почистить за собой
+
+В 1cestart: правый клик на `UNF-RESTORE-TEST-...` → **Удалить из списка** (НЕ «Удалить саму базу»!). Убедиться что боевая `UNF` осталась.
+
+Потом в PowerShell:
 
 ```powershell
 Remove-Item C:\restore_test -Recurse -Force
 ```
 
-Удалить базу из списка в 1cestart (правый клик → убрать из списка).
+Проверить что боевая `D:\1С\БД\UNF` на месте:
+
+```powershell
+Test-Path D:\1С\БД\UNF\1Cv8.1CD  # должно быть True
+```
 
 ## Что делать если тест провалился
 
