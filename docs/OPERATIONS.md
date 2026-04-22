@@ -71,11 +71,15 @@ serverpanel export-keys
 
 ### 1.7. Запустить uvicorn
 
+Первый раз — руками:
+
 ```bash
 uvicorn serverpanel.main:app --host 0.0.0.0 --port 5000 --reload
 ```
 
 Открыть `http://localhost:5000`, залогиниться, проверить что видны 3 бэкап-конфига. Прожать **Install schedule** на каждом — создаст Task Scheduler задачи на целевом сервере.
+
+Потом (для постоянной работы) — лучше поставить LaunchAgent, см. §7.
 
 ### 1.8. Первый прогон
 
@@ -216,6 +220,72 @@ uvicorn serverpanel.main:app --host 0.0.0.0 --port 5000 --reload
 Пока креды не заведены — эта функция в UI красиво светит «not configured».
 
 ---
+
+## 7. Автозапуск на маке через LaunchAgent
+
+Чтобы uvicorn крутился всегда (стартовал при логине, перезапускался при падении, не требовал открытого терминала).
+
+### Установка
+
+```bash
+mkdir -p ~/Library/LaunchAgents ~/Library/Logs
+cat > ~/Library/LaunchAgents/ru.gefest.serverpanel.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ru.gefest.serverpanel</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/deniskarpov/projects/serverpanel/.venv/bin/uvicorn</string>
+        <string>serverpanel.main:app</string>
+        <string>--host</string><string>127.0.0.1</string>
+        <string>--port</string><string>5000</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/deniskarpov/projects/serverpanel</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key>
+    <string>/Users/deniskarpov/Library/Logs/serverpanel.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/deniskarpov/Library/Logs/serverpanel.err.log</string>
+</dict>
+</plist>
+EOF
+
+# перед этим — Ctrl+C на уже запущенном uvicorn, иначе порт 5000 занят
+launchctl load -w ~/Library/LaunchAgents/ru.gefest.serverpanel.plist
+```
+
+Проверить: `launchctl list | grep serverpanel` (должен быть PID), `curl http://127.0.0.1:5000/health`.
+
+### Обновление после `git pull`
+
+```bash
+cd ~/projects/serverpanel
+git pull origin main
+launchctl kickstart -k gui/$(id -u)/ru.gefest.serverpanel
+```
+
+### Логи
+
+```bash
+tail -f ~/Library/Logs/serverpanel.log       # stdout
+tail -f ~/Library/Logs/serverpanel.err.log   # stderr (тут будут traceback-и)
+```
+
+### Выключить / включить
+
+```bash
+launchctl unload ~/Library/LaunchAgents/ru.gefest.serverpanel.plist   # остановить и убрать из автозапуска
+launchctl load -w ~/Library/LaunchAgents/ru.gefest.serverpanel.plist  # снова включить
+```
+
+### Режим разработки (--reload)
+
+Выгрузить агент (`launchctl unload ...`) → запустить `uvicorn ... --reload` в терминале вручную → после работы `launchctl load -w ...`.
 
 ## 6. Список CLI-команд serverpanel
 
