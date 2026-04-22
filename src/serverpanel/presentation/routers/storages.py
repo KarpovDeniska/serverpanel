@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from serverpanel.infrastructure.crypto import encrypt_json
+from serverpanel.infrastructure.crypto import decrypt_json, encrypt_json
 from serverpanel.infrastructure.database.models import Server, StorageConfig, User
 from serverpanel.infrastructure.database.repositories.backups import (
     StorageConfigRepository,
@@ -46,7 +46,99 @@ async def new_storage_form(
         "user": user,
         "server": server,
         "storage_types": list_storage_types(),
+        "storage": None,           # None = new-mode
+        "conn": {},                 # no pre-fill
     })
+
+
+@router.get("/{storage_id}/edit", response_class=HTMLResponse)
+async def edit_storage_form(
+    server_id: int,
+    storage_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    server = await _server_or_404(server_id, user, db)
+    storage = await StorageConfigRepository(db).get_by_id_for_user(storage_id, user.id)
+    if not storage or storage.server_id != server.id:
+        raise HTTPException(404, "Storage not found")
+    try:
+        decrypted = decrypt_json(storage.connection_encrypted)
+    except Exception:
+        decrypted = {}
+    # Strip secrets so the HTML doesn't leak them; operator re-enters if
+    # they want to rotate.
+    conn_safe = {
+        "host": decrypted.get("host", ""),
+        "user": decrypted.get("user", ""),
+        "port": decrypted.get("port", ""),
+        "has_private_key": bool(decrypted.get("private_key")),
+        "has_password": bool(decrypted.get("password")),
+    }
+    return templates.TemplateResponse(request, "storages/edit.html", {
+        "user": user,
+        "server": server,
+        "storage_types": list_storage_types(),
+        "storage": storage,
+        "conn": conn_safe,
+    })
+
+
+@router.post("/{storage_id}/edit")
+async def update_storage(
+    server_id: int,
+    storage_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    server = await _server_or_404(server_id, user, db)
+    storage = await StorageConfigRepository(db).get_by_id_for_user(storage_id, user.id)
+    if not storage or storage.server_id != server.id:
+        raise HTTPException(404, "Storage not found")
+    form = await request.form()
+
+    storage_type = (form.get("storage_type") or storage.storage_type).strip()
+    name = (form.get("name") or "").strip()
+    host = (form.get("host") or "").strip()
+    username = (form.get("username") or "").strip()
+    port_raw = (form.get("port") or "").strip()
+    password = form.get("password") or ""
+    private_key = form.get("private_key") or ""
+    base_path = (form.get("base_path") or "/").strip() or "/"
+
+    if not all([storage_type, name, host, username]):
+        raise HTTPException(400, "storage_type, name, host, username обязательны")
+    try:
+        port = int(port_raw) if port_raw else (23 if storage_type == "hetzner_storagebox" else 22)
+    except ValueError as e:
+        raise HTTPException(400, f"port: {e}") from e
+
+    # Preserve existing secrets if operator didn't re-enter them.
+    try:
+        prev = decrypt_json(storage.connection_encrypted)
+    except Exception:
+        prev = {}
+    connection = {"host": host, "user": username, "port": port}
+    if password:
+        connection["password"] = password
+    elif prev.get("password") and not private_key:
+        connection["password"] = prev["password"]
+    if private_key:
+        connection["private_key"] = private_key
+    elif prev.get("private_key") and not password:
+        connection["private_key"] = prev["private_key"]
+
+    storage.storage_type = storage_type
+    storage.name = name
+    storage.base_path = base_path
+    storage.connection_encrypted = encrypt_json(connection)
+    db.add(storage)
+    await db.commit()
+    return RedirectResponse(
+        f"/servers/{server_id}?toast=ok:Storage updated", status_code=302
+    )
 
 
 @router.post("/new")
