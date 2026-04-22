@@ -12,12 +12,44 @@
     </div>
     <div class="flex items-center justify-between">
         <h2 class="text-2xl font-bold">Бэкапы</h2>
-        <a href="/servers/{{ server.id }}/backups/new"
-           class="px-4 py-2 bg-dark-accent/20 border border-dark-accent/50 text-dark-accent rounded hover:bg-dark-accent/30">
-            + New backup
-        </a>
+        <div class="flex gap-2">
+            <form method="post" action="/servers/{{ server.id }}/backups/sync">
+                <button type="submit"
+                        class="px-3 py-2 bg-dark-bg border border-dark-border text-dark-text rounded hover:border-dark-accent hover:text-dark-accent text-sm"
+                        title="Подтянуть отчёты Task Scheduler-запусков с сервера">
+                    ⟲ Sync
+                </button>
+            </form>
+            <a href="/servers/{{ server.id }}/backups/new"
+               class="px-4 py-2 bg-dark-accent/20 border border-dark-accent/50 text-dark-accent rounded hover:bg-dark-accent/30">
+                + New backup
+            </a>
+        </div>
     </div>
 </div>
+
+{# Toast after POST /sync | /install | /uninstall #}
+<div id="sp-toast" class="hidden mb-4 px-4 py-2 rounded border text-sm"></div>
+<script>
+(function () {
+    const q = new URLSearchParams(location.search).get("toast");
+    if (!q) return;
+    const [kind, ...rest] = q.split(":");
+    const msg = rest.join(":") || "";
+    const el = document.getElementById("sp-toast");
+    if (!el) return;
+    if (kind === "ok") {
+        el.className = "mb-4 px-4 py-2 rounded border text-sm bg-green-900/30 border-green-700 text-green-400";
+        el.textContent = "✅ " + msg;
+    } else {
+        el.className = "mb-4 px-4 py-2 rounded border text-sm bg-red-900/30 border-red-700 text-red-400 whitespace-pre-wrap";
+        el.textContent = "❌ " + msg;
+    }
+    const url = new URL(location.href);
+    url.searchParams.delete("toast");
+    history.replaceState({}, "", url.pathname + (url.search ? "?" + url.searchParams : "") + url.hash);
+})();
+</script>
 
 {% if not storages %}
 <div class="mb-4 bg-yellow-900/30 border border-yellow-700 text-yellow-300 px-4 py-3 rounded text-sm">

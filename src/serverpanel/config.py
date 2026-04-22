@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # Optimal is only worth it if storage space is a hard constraint.
     backup_zip_level: str = "fastest"
 
+    # Background sync of scheduled-run reports from target servers into
+    # BackupHistory. 0 = disabled (manual Sync-now button still works).
+    backup_sync_interval_seconds: int = 15 * 60
+
     @model_validator(mode="after")
     def _validate_secrets(self) -> "Settings":
         if self.debug:

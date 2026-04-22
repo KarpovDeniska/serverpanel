@@ -22,16 +22,75 @@ STATIC_DIR = str(_PKG_ROOT / "static")
 TEMPLATES_DIR = str(_PKG_ROOT / "templates")
 
 
+async def _backup_sync_loop(interval_seconds: int) -> None:
+    """Every `interval_seconds`, walk every Server with a configured
+    ProviderConfig + SSH creds and pull scheduled-run reports from its
+    `C:\\ProgramData\\serverpanel\\configs\\*\\last_report.json` into
+    BackupHistory. Lets the UI reflect nightly Task Scheduler runs even
+    though serverpanel itself didn't initiate them.
+    """
+    import asyncio
+    import logging
+
+    from sqlalchemy import select as _select
+    from sqlalchemy.orm import selectinload
+
+    from serverpanel.application.services.backup_service import BackupService
+    from serverpanel.infrastructure.database.engine import get_session_factory
+    from serverpanel.infrastructure.database.models import Server
+
+    log = logging.getLogger("serverpanel.sync")
+
+    while True:
+        try:
+            factory = get_session_factory()
+            async with factory() as db:
+                servers = (await db.execute(
+                    _select(Server).options(selectinload(Server.provider_config))
+                )).scalars().all()
+                for srv in servers:
+                    if not srv.ssh_key_encrypted:
+                        continue
+                    try:
+                        svc = BackupService(db)
+                        created = await svc.sync_reports_from_server(srv)
+                        if created:
+                            log.info("backup sync: server=%s created=%d", srv.name, created)
+                    except Exception:
+                        log.exception("backup sync failed for server %s", srv.id)
+        except Exception:
+            log.exception("backup sync loop iteration crashed")
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown."""
+    import asyncio
+
     # Import providers to auto-register
     import serverpanel.infrastructure.providers.hetzner  # noqa: F401
     import serverpanel.infrastructure.providers.storage.hetzner_storagebox  # noqa: F401
 
     await init_db()
     await cleanup_stale_runs()
+
+    cfg = get_settings()
+    sync_task: asyncio.Task | None = None
+    if cfg.backup_sync_interval_seconds > 0:
+        sync_task = asyncio.create_task(
+            _backup_sync_loop(cfg.backup_sync_interval_seconds),
+            name="backup-sync-loop",
+        )
+
     yield
+
+    if sync_task is not None:
+        sync_task.cancel()
+        try:
+            await sync_task
+        except (asyncio.CancelledError, Exception):
+            pass
     await dispose_db()
 
 

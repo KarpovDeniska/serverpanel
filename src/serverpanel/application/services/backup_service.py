@@ -530,6 +530,129 @@ class BackupService:
                     f"{(r.stderr or r.stdout)[-400:]}"
                 )
 
+    async def sync_reports_from_server(self, server: Server) -> int:
+        """Pull Task-Scheduler-driven backup reports from the target server
+        into BackupHistory so the UI sees nightly runs (not just UI-triggered
+        Run-now).
+
+        Looks at `C:\\ProgramData\\serverpanel\\configs\\<id>\\last_report.json`
+        for every configured backup, dedupes by the report's run_id (written
+        in history.details.run_id) and creates a new BackupHistory row for
+        each previously-unseen run.
+
+        Returns: number of rows created.
+        """
+        if not server.ssh_key_encrypted:
+            return 0
+
+        from sqlalchemy import select as _select
+        created = 0
+
+        async with self._open_ssh(server) as ssh:
+            await self._persist_learned_host_key()
+
+            # List config-ids present under REMOTE_CONFIGS_DIR
+            r = await ssh.execute(
+                f'powershell -NoProfile -Command '
+                f'"if (Test-Path \'{REMOTE_CONFIGS_DIR}\') '
+                f'{{ Get-ChildItem \'{REMOTE_CONFIGS_DIR}\' -Directory | '
+                f'Select-Object -ExpandProperty Name }}"',
+                timeout=30,
+            )
+            if r.exit_code != 0:
+                return 0
+            raw_ids = [line.strip() for line in (r.stdout or "").splitlines() if line.strip()]
+
+            for cid_str in raw_ids:
+                try:
+                    cid = int(cid_str)
+                except ValueError:
+                    continue
+
+                _, _, report_path = _scheduled_paths(cid)
+                try:
+                    report_bytes = await ssh.fetch_file(report_path)
+                except Exception:
+                    continue
+                try:
+                    report = json.loads(report_bytes.decode("utf-8"))
+                except Exception:
+                    continue
+
+                run_id = report.get("run_id")
+                if not run_id:
+                    continue
+
+                # Dedupe: if the most recent history for this config is the
+                # same run_id, skip.
+                existing = (await self.db.execute(
+                    _select(BackupHistory)
+                    .where(BackupHistory.backup_config_id == cid)
+                    .order_by(BackupHistory.id.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+                if existing and (existing.details or {}).get("run_id") == run_id:
+                    continue
+
+                # run_id is "YYYYMMDD_HHMMSS" in server-local time; run_at is ISO UTC.
+                started_at = None
+                try:
+                    started_at = datetime.datetime.strptime(run_id, "%Y%m%d_%H%M%S")
+                except Exception:
+                    pass
+                completed_at = None
+                try:
+                    run_at = report.get("run_at")
+                    if run_at:
+                        completed_at = datetime.datetime.fromisoformat(
+                            run_at.replace("Z", "+00:00")
+                        )
+                except Exception:
+                    pass
+
+                dests = report.get("destinations", [])
+                ok = [d for d in dests if d.get("status") == "success"]
+                failed = [d for d in dests if d.get("status") == "failed"]
+
+                if not dests:
+                    status = BackupStatus.FAILED
+                    err = report.get("error") or "empty report"
+                elif failed and ok:
+                    status = BackupStatus.PARTIAL
+                    err = "; ".join(d.get("error", "?") for d in failed[:3])
+                elif failed:
+                    status = BackupStatus.FAILED
+                    err = "; ".join(d.get("error", "?") for d in failed[:3])
+                else:
+                    status = BackupStatus.SUCCESS
+                    err = None
+                size_bytes = sum(int(d.get("size_bytes") or 0) for d in dests)
+
+                hist = BackupHistory(
+                    backup_config_id=cid,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    status=status.value,
+                    current_step="Готово",
+                    progress=100,
+                    size_bytes=size_bytes,
+                    error_message=err,
+                    details={
+                        "log": [],  # live stdout not available for scheduled runs
+                        "destinations": dests,
+                        "run_id": run_id,
+                        "source": "scheduled",  # mark origin for UI
+                        "script_exit": report.get("script_exit"),
+                    },
+                )
+                self.db.add(hist)
+                created += 1
+
+            if created:
+                await self.db.commit()
+
+        return created
+
     async def uninstall_schedule(self, config: BackupConfig) -> None:
         """Remove the Task Scheduler task and its frozen plan folder."""
         base, _, _ = _scheduled_paths(config.id)

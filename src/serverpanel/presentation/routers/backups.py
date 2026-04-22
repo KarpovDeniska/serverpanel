@@ -98,6 +98,29 @@ async def list_backups(
     })
 
 
+@router.post("/sync")
+async def sync_reports(
+    server_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger: pull scheduled-run reports from this server
+    into BackupHistory right now instead of waiting for the background
+    poller."""
+    server = await _server_or_404(server_id, user, db)
+    try:
+        created = await BackupService(db).sync_reports_from_server(server)
+    except Exception as e:
+        msg = str(e).replace("\n", " ").replace("\r", " ")[:500]
+        return RedirectResponse(
+            url=f"/servers/{server_id}/backups?toast=err:{msg}", status_code=302
+        )
+    return RedirectResponse(
+        url=f"/servers/{server_id}/backups?toast=ok:Sync done, {created} new run(s) imported",
+        status_code=302,
+    )
+
+
 @router.get("/new", response_class=HTMLResponse)
 async def new_backup_form(
     server_id: int,
