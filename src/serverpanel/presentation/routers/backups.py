@@ -101,22 +101,32 @@ async def list_backups(
 @router.post("/sync")
 async def sync_reports(
     server_id: int,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Manually trigger: pull scheduled-run reports from this server
     into BackupHistory right now instead of waiting for the background
-    poller."""
+    poller. Respects `next` form field so sync button on the server
+    detail card redirects back there (not to the backup list).
+    """
     server = await _server_or_404(server_id, user, db)
+
+    form = await request.form()
+    next_url = (form.get("next") or "").strip()
+    # Allow only same-origin relative paths, no protocol-relative ("//").
+    if not (next_url.startswith("/") and not next_url.startswith("//") and ":" not in next_url):
+        next_url = f"/servers/{server_id}/backups"
+
     try:
         created = await BackupService(db).sync_reports_from_server(server)
     except Exception as e:
         msg = str(e).replace("\n", " ").replace("\r", " ")[:500]
-        return RedirectResponse(
-            url=f"/servers/{server_id}/backups?toast=err:{msg}", status_code=302
-        )
+        sep = "&" if "?" in next_url else "?"
+        return RedirectResponse(url=f"{next_url}{sep}toast=err:{msg}", status_code=302)
+    sep = "&" if "?" in next_url else "?"
     return RedirectResponse(
-        url=f"/servers/{server_id}/backups?toast=ok:Sync done, {created} new run(s) imported",
+        url=f"{next_url}{sep}toast=ok:Sync done, {created} new run(s) imported",
         status_code=302,
     )
 

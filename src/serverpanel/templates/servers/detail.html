@@ -201,6 +201,7 @@
             </a>
             <div class="flex items-center gap-2">
                 <form method="post" action="/servers/{{ server.id }}/backups/sync" class="leading-none">
+                    <input type="hidden" name="next" value="/servers/{{ server.id }}">
                     <button type="submit"
                             class="text-xs text-dark-muted hover:text-dark-accent"
                             title="Подтянуть отчёты Task Scheduler с сервера">⟲ sync</button>
