@@ -9,10 +9,21 @@
     const COMPRESS_KINDS = ["none", "zip"];
     const FREQUENCIES = ["daily", "weekly"];
 
-    const storages = JSON.parse(root.dataset.storages || "[]");
+    // JSON payloads live in <script type="application/json"> blocks (not in
+     // data-attributes) so `"` inside the payload doesn't break attribute
+     // parsing and kill the whole builder on load.
+    function readJson(id, fallback) {
+        const el = document.getElementById(id);
+        if (!el) return fallback;
+        const txt = (el.textContent || "").trim();
+        if (!txt) return fallback;
+        try { return JSON.parse(txt); }
+        catch (e) { console.error("bad JSON in " + id, e, txt); return fallback; }
+    }
+    const storages = readJson("plan-storages-data", []);
     const state = {
-        sources: JSON.parse(root.dataset.sources || "[]"),
-        destinations: JSON.parse(root.dataset.destinations || "[]"),
+        sources: readJson("plan-sources-data", []),
+        destinations: readJson("plan-destinations-data", []),
     };
 
     const listsEl = {

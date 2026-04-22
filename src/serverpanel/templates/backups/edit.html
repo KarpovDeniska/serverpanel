@@ -41,10 +41,15 @@
     </div>
 
     <!-- Builder UI (Alpine.js). Hidden inputs `sources`/`destinations` are serialized on submit. -->
-    <div id="plan-builder"
-         data-sources="{{ (config.sources | tojson) if config else '[]' }}"
-         data-destinations="{{ (config.destinations | tojson) if config else '[]' }}"
-         data-storages='[{% for s in storages %}{"id":{{ s.id }},"name":"{{ s.name }}","type":"{{ s.storage_type }}"}{% if not loop.last %},{% endif %}{% endfor %}]'>
+    {# JSON payloads go in <script type="application/json"> blocks instead of
+       data-attributes: otherwise any `"` inside the payload (from tojson)
+       terminates the attribute early, JSON.parse throws, and the whole
+       builder dies silently — leaving all buttons inert. textContent inside
+       a <script> tag is raw and needs no HTML escaping. #}
+    <script id="plan-sources-data" type="application/json">{% if config %}{{ config.sources | tojson }}{% else %}[]{% endif %}</script>
+    <script id="plan-destinations-data" type="application/json">{% if config %}{{ config.destinations | tojson }}{% else %}[]{% endif %}</script>
+    <script id="plan-storages-data" type="application/json">[{% for s in storages %}{"id":{{ s.id }},"name":{{ s.name | tojson }},"type":{{ s.storage_type | tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]</script>
+    <div id="plan-builder">
         <!-- sources -->
         <div class="mb-6">
             <div class="flex items-center justify-between mb-2">
