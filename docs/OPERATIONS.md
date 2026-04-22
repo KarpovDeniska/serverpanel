@@ -8,16 +8,44 @@
 
 Предполагается что на целевом Windows-сервере уже что-то работает (либо это рабочий сервер с 1С, либо ты его только что развернул вручную).
 
+### 1.0. Системные зависимости (голый мак)
+
+На чистой macOS нет ни `git`, ни `python3.12`, ни компиляторов для `cryptography`/`bcrypt`. Поставить всё за один проход:
+
+```bash
+# 1. Xcode Command Line Tools — git, clang, headers (нужны для pip install cryptography/bcrypt)
+xcode-select --install   # откроет GUI-диалог, нажать Install, подождать ~5 мин
+
+# 2. Homebrew (если ещё нет)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+# после установки следовать инструкции на экране: добавить brew в PATH
+# (Apple Silicon: eval "$(/opt/homebrew/bin/brew shellenv)")
+
+# 3. Python 3.12 (pydantic v2 требует ≥3.11, проект таргетит 3.12)
+brew install python@3.12
+
+# 4. Проверка
+python3.12 --version   # Python 3.12.x
+git --version
+```
+
+Дополнительно понадобится:
+- **SSH-ключи** для hetzner-windows и Storage Box. Если восстановление из §4-tar — они внутри архива (`~/.ssh/serverpanel-seed/`). Если с нуля — нужны приватные ключи от `gefest@hetzner-windows` и `u571198@your-storagebox.de`.
+- Доступ к Telegram (аккаунт, чтобы прочитать сообщения от бота).
+
 ### 1.1. Клонировать репо и поставить зависимости
 
 ```bash
-cd ~/projects   # или где держишь проекты
+mkdir -p ~/projects && cd ~/projects
 git clone https://github.com/KarpovDeniska/serverpanel.git
 cd serverpanel
 python3.12 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -e .
 ```
+
+`pip install -e .` потянет все Python-зависимости из `pyproject.toml` (FastAPI, uvicorn, SQLAlchemy, paramiko, cryptography, bcrypt, itsdangerous, pydantic, jinja2, httpx, alembic). Занимает ~1–2 мин на быстром инете.
 
 ### 1.2. Сгенерировать `.env`
 
@@ -191,12 +219,14 @@ tar czf ~/Desktop/serverpanel-backup-$(date +%Y%m%d).tar.gz \
 
 ### Восстановить на новом маке
 
+**Если мак голый** — сначала §1.0 (xcode-select, brew, python@3.12), потом:
+
 ```bash
 # 1. Клонировать репо
-cd ~/projects
+mkdir -p ~/projects && cd ~/projects
 git clone https://github.com/KarpovDeniska/serverpanel.git
 cd serverpanel
-python3.12 -m venv .venv && source .venv/bin/activate && pip install -e .
+python3.12 -m venv .venv && source .venv/bin/activate && pip install --upgrade pip && pip install -e .
 
 # 2. Достать архив из облака, распаковать
 tar xzf ~/Downloads/serverpanel-backup-YYYYMMDD.tar.gz -C ~
@@ -206,6 +236,8 @@ uvicorn serverpanel.main:app --host 0.0.0.0 --port 5000 --reload
 ```
 
 В UI должны быть все три бэкап-конфига и история. Task Scheduler задачи на hetzner-windows переустанавливать не надо — они живут на сервере независимо, frozen plan уже на месте.
+
+Для постоянной работы — поставить LaunchAgent (§7). От голого мака до работающей панели с автозапуском — ~15 минут при наличии tar-архива.
 
 ### Восстановить без `.env` (потерян `ENCRYPTION_KEY`)
 
