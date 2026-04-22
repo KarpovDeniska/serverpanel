@@ -96,6 +96,7 @@ def cli():
     Subcommands:
       serverpanel                                — run server (default)
       serverpanel serve                          — run server (explicit)
+      serverpanel seed ...                       — populate DB with user + server + storage
       serverpanel import-hetzner-recovery <yaml> — port a legacy hetzner-recovery config.yaml
     """
     import argparse
@@ -107,6 +108,27 @@ def cli():
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("serve", help="Run the web server")
+
+    seed_cmd = sub.add_parser(
+        "seed",
+        help="Create/update User + ProviderConfig + Server + StorageConfig in one shot",
+    )
+    seed_cmd.add_argument("--admin-email", required=True)
+    seed_cmd.add_argument("--admin-password", help="Required only if the user doesn't exist yet")
+    seed_cmd.add_argument("--server-ip", required=True)
+    seed_cmd.add_argument("--server-ssh-username", default="Administrator")
+    seed_cmd.add_argument("--server-ssh-key", help="Path to Windows-server SSH private key")
+    seed_cmd.add_argument("--server-ssh-password", help="Alternative to SSH key")
+    seed_cmd.add_argument("--sb-host", required=True)
+    seed_cmd.add_argument("--sb-user", required=True)
+    seed_cmd.add_argument("--sb-port", type=int, default=23)
+    seed_cmd.add_argument("--sb-ssh-key", help="Path to Storage Box SSH private key")
+    seed_cmd.add_argument("--sb-password", help="Alternative to SSH key")
+    seed_cmd.add_argument("--robot-user", help="Hetzner Robot webservice login (starts with #ws+)")
+    seed_cmd.add_argument("--robot-password", help="Hetzner Robot webservice password")
+    seed_cmd.add_argument("--provider-name", default="hetzner-dedicated")
+    seed_cmd.add_argument("--server-name", default="hetzner-windows")
+    seed_cmd.add_argument("--storage-name", default="hetzner-storagebox")
 
     imp = sub.add_parser(
         "import-hetzner-recovery",
@@ -145,6 +167,48 @@ def cli():
                     rescue_private_key_text=srv_key_text,
                 )
                 print("Imported:")
+                for k, v in result.items():
+                    print(f"  {k}: {v}")
+            await _dispose()
+
+        asyncio.run(_run())
+        sys.exit(0)
+
+    if args.command == "seed":
+        from serverpanel.application.importers.seed import seed as _seed
+        from serverpanel.infrastructure.database.engine import (
+            dispose_db as _dispose,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            get_session_factory,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            init_db as _init,
+        )
+
+        async def _run():
+            await _init()
+            async with get_session_factory()() as db:
+                result = await _seed(
+                    db,
+                    admin_email=args.admin_email,
+                    admin_password=args.admin_password,
+                    server_ip=args.server_ip,
+                    server_ssh_username=args.server_ssh_username,
+                    server_ssh_key_path=args.server_ssh_key,
+                    server_ssh_password=args.server_ssh_password,
+                    sb_host=args.sb_host,
+                    sb_user=args.sb_user,
+                    sb_port=args.sb_port,
+                    sb_ssh_key_path=args.sb_ssh_key,
+                    sb_password=args.sb_password,
+                    robot_user=args.robot_user,
+                    robot_password=args.robot_password,
+                    provider_name=args.provider_name,
+                    server_name=args.server_name,
+                    storage_name=args.storage_name,
+                )
+                print("Seeded:")
                 for k, v in result.items():
                     print(f"  {k}: {v}")
             await _dispose()
