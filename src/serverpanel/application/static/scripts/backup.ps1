@@ -149,7 +149,7 @@ function Stage-Source($src, $stageBase) {
         if ((Get-Item -LiteralPath $stagePath).PSIsContainer) {
             [System.IO.Compression.ZipFile]::CreateFromDirectory(
                 $stagePath, $zipPath,
-                [System.IO.Compression.CompressionLevel]::Optimal,
+                $script:ZipLevel,
                 $false  # includeBaseDirectory: contents only, matches old Compress-Archive `path\*` behavior
             )
         } else {
@@ -160,7 +160,7 @@ function Stage-Source($src, $stageBase) {
                 try {
                     [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                         $zip, $stagePath, (Split-Path $stagePath -Leaf),
-                        [System.IO.Compression.CompressionLevel]::Optimal
+                        $script:ZipLevel
                     ) | Out-Null
                 } finally { $zip.Dispose() }
             } finally { $zipStream.Dispose() }
@@ -210,7 +210,7 @@ function Invoke-LocalDestination($dest, $sourcesByAlias, $today) {
                 if ((Get-Item -LiteralPath $dstPath).PSIsContainer) {
                     [System.IO.Compression.ZipFile]::CreateFromDirectory(
                         $dstPath, $zipPath,
-                        [System.IO.Compression.CompressionLevel]::Optimal,
+                        $script:ZipLevel,
                         $false
                     )
                 } else {
@@ -220,7 +220,7 @@ function Invoke-LocalDestination($dest, $sourcesByAlias, $today) {
                         try {
                             [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                                 $zip, $dstPath, (Split-Path $dstPath -Leaf),
-                                [System.IO.Compression.CompressionLevel]::Optimal
+                                $script:ZipLevel
                             ) | Out-Null
                         } finally { $zip.Dispose() }
                     } finally { $zipStream.Dispose() }
@@ -451,6 +451,21 @@ try {
 
 Log "=== backup run $runId - config '$($plan.config_name)' ==="
 Log "sources: $($plan.sources.Count), destinations: $($plan.destinations.Count), today: $($plan.date_folder)"
+
+# Resolve zip compression level once (plan.options.zip_level is "fastest"|"optimal";
+# default to Fastest — 2-3x faster than Optimal at the cost of ~15% size).
+$script:zipLevelRaw = "fastest"
+if ($plan.PSObject.Properties.Name -contains 'options' -and $plan.options -and $plan.options.zip_level) {
+    $script:zipLevelRaw = [string]$plan.options.zip_level
+}
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$script:ZipLevel = if ($script:zipLevelRaw -ieq "optimal") {
+    $script:ZipLevel
+} else {
+    [System.IO.Compression.CompressionLevel]::Fastest
+}
+Log "zip compression: $($script:zipLevelRaw)"
 
 $sourcesByAlias = @{}
 foreach ($s in $plan.sources) { $sourcesByAlias[$s.alias] = $s }

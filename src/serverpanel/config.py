@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # Backup zip compression level — "fastest" | "optimal".
+    # Fastest is ~2-3x faster at the cost of ~15-20% larger archives; for
+    # 1C file-based DB (binary .1CD) the ratio is still ~55-60% of original.
+    # Optimal is only worth it if storage space is a hard constraint.
+    backup_zip_level: str = "fastest"
+
     @model_validator(mode="after")
     def _validate_secrets(self) -> "Settings":
         if self.debug:

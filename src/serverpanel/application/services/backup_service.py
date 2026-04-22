@@ -304,6 +304,9 @@ class BackupService:
             "sources": [s.model_dump() for s in plan.sources],
             "destinations": resolved_destinations,
             "notifications": notifications,
+            "options": {
+                "zip_level": settings.backup_zip_level,  # "fastest" | "optimal"
+            },
         }
 
     # ------------------------------------------------------------------
