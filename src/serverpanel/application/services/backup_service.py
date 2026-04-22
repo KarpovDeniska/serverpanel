@@ -375,11 +375,14 @@ class BackupService:
             history.status = BackupStatus.SUCCESS
 
         history.size_bytes = sum(int(d.get("size_bytes") or 0) for d in dests)
-        details = history.details or {"log": [], "destinations": []}
-        details["destinations"] = dests
-        details["script_exit"] = script_exit
-        details["skipped"] = [d.get("index") for d in skipped]
-        history.details = details
+        # Same JSON-identity-tracking gotcha as _append_log — build a new dict.
+        existing = history.details or {"log": [], "destinations": []}
+        history.details = {
+            **existing,
+            "destinations": dests,
+            "script_exit": script_exit,
+            "skipped": [d.get("index") for d in skipped],
+        }
 
     # ------------------------------------------------------------------
     # Log helpers
@@ -393,9 +396,16 @@ class BackupService:
             "message": message,
             "level": level,
         }
-        details = history.details or {"log": [], "destinations": []}
-        details.setdefault("log", []).append(entry)
-        history.details = details
+        # SQLAlchemy's JSON column tracks dirtiness by identity, not by deep
+        # content. Mutating history.details["log"] in place + reassigning the
+        # same dict reference keeps the attribute "clean" and the commit is a
+        # no-op — on refresh the UI reads back the stale empty dict.
+        # Build a fresh dict (and fresh list) so the attribute event fires.
+        existing = history.details or {"log": [], "destinations": []}
+        history.details = {
+            **existing,
+            "log": list(existing.get("log", [])) + [entry],
+        }
         await self._flush(history)
         await self.reporter.log(message, level)
 
