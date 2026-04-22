@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     github_client_id: str = ""
     github_client_secret: str = ""
 
+    # Notifications — sent from inside backup.ps1 on the target server.
+    # Empty = no alerts (silent). Token format: "123456:ABC-DEF...".
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     @model_validator(mode="after")
     def _validate_secrets(self) -> "Settings":
         if self.debug:

@@ -285,6 +285,14 @@ class BackupService:
             else:
                 raise RuntimeError(f"Unknown destination kind at index {idx}")
 
+        settings = get_settings()
+        notifications: dict = {}
+        if settings.telegram_bot_token and settings.telegram_chat_id:
+            notifications["telegram"] = {
+                "bot_token": settings.telegram_bot_token,
+                "chat_id": settings.telegram_chat_id,
+            }
+
         return {
             "schema_version": 1,
             "config_id": config.id,
@@ -295,6 +303,7 @@ class BackupService:
             "global_rotation_days": config.rotation_days,
             "sources": [s.model_dump() for s in plan.sources],
             "destinations": resolved_destinations,
+            "notifications": notifications,
         }
 
     # ------------------------------------------------------------------

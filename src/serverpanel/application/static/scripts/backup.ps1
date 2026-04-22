@@ -459,5 +459,52 @@ $report = @{
     destinations = $results
 }
 Write-Utf8 $ReportPath ($report | ConvertTo-Json -Depth 20)
-Log "=== backup finished, report: $ReportPath ==="
+
+# ---------------------------------------------------------------------------
+# Telegram notifications
+# ---------------------------------------------------------------------------
+# Aggregate per-destination statuses → overall run status.
+$okCount     = @($results | Where-Object { $_.status -eq "success" }).Count
+$failedCount = @($results | Where-Object { $_.status -eq "failed"  }).Count
+$partialAny  = @($results | Where-Object { $_.status -eq "partial" }).Count
+if ($results.Count -eq 0)        { $overall = "failed" }
+elseif ($failedCount -gt 0 -and $okCount -gt 0) { $overall = "partial" }
+elseif ($failedCount -gt 0)      { $overall = "failed" }
+elseif ($partialAny -gt 0)       { $overall = "partial" }
+else                             { $overall = "success" }
+
+$tg = $null
+if ($plan.PSObject.Properties.Name -contains 'notifications' -and $plan.notifications) {
+    if ($plan.notifications.PSObject.Properties.Name -contains 'telegram' -and $plan.notifications.telegram) {
+        $tg = $plan.notifications.telegram
+    }
+}
+
+# Only alert on non-success — successful backups are silent to avoid notification fatigue.
+if ($tg -and $tg.bot_token -and $tg.chat_id -and $overall -ne "success") {
+    try {
+        $totalMb = [math]::Round((($results | Measure-Object -Property size_bytes -Sum).Sum) / 1MB, 1)
+        $icon = if ($overall -eq "failed") { "❌" } else { "⚠️" }
+        $lines = @(
+            "$icon Backup <b>$overall</b>: $($plan.config_name)"
+            "Host: $env:COMPUTERNAME | Run: $runId"
+            "Destinations: ok=$okCount failed=$failedCount partial=$partialAny | Size: ${totalMb} MB"
+        )
+        foreach ($r in $results) {
+            if ($r.status -ne "success") {
+                $err = if ($r.error) { $r.error } else { "(no error message)" }
+                $lines += "• [$($r.index)] $($r.kind) $($r.status): $err"
+            }
+        }
+        $text = ($lines -join "`n")
+        $body = @{ chat_id = $tg.chat_id; text = $text; parse_mode = "HTML"; disable_web_page_preview = $true } | ConvertTo-Json -Compress
+        $url  = "https://api.telegram.org/bot$($tg.bot_token)/sendMessage"
+        Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 30 | Out-Null
+        Log "telegram alert sent (overall=$overall)"
+    } catch {
+        Log "telegram alert FAILED: $_"
+    }
+}
+
+Log "=== backup finished, overall=$overall, report: $ReportPath ==="
 exit 0
