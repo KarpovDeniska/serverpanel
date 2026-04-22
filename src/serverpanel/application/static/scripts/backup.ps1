@@ -12,6 +12,11 @@ param(
 
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
+# Force stdout/stderr to UTF-8 so Cyrillic paths and messages land in the UI
+# as real characters, not cp1251 mojibake — PS 5.1 under sshd on ru-RU
+# defaults to the system OEM codepage and paramiko reads as UTF-8.
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $runId = (Get-Date).ToString("yyyyMMdd_HHmmss")
 # Staging lives outside ProgramData\serverpanel so that a source pointing at
 # that directory (or any of its parents) does not end up copying staging into
