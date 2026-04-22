@@ -103,16 +103,20 @@ class AsyncSSHClient:
         )
 
     def _load_pkey(self) -> paramiko.PKey | None:
-        """Parse PEM private key (tries Ed25519, RSA, ECDSA, DSS)."""
+        """Parse PEM private key (tries Ed25519, RSA, ECDSA, DSS if present)."""
         if not self.private_key:
             return None
 
-        pk_cls = (
+        # DSSKey removed in paramiko 4.x — include only if available.
+        pk_cls: list[type[paramiko.PKey]] = [
             paramiko.Ed25519Key,
             paramiko.RSAKey,
             paramiko.ECDSAKey,
-            paramiko.DSSKey,
-        )
+        ]
+        dss = getattr(paramiko, "DSSKey", None)
+        if dss is not None:
+            pk_cls.append(dss)
+
         last_err: Exception | None = None
         for cls in pk_cls:
             try:
