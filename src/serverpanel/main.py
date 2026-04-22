@@ -139,6 +139,15 @@ def cli():
     imp.add_argument("--sb-private-key", help="Path to Storage Box SSH private key (contents will be encrypted and stored)")
     imp.add_argument("--server-private-key", help="Path to target Windows server SSH private key")
 
+    legacy = sub.add_parser(
+        "seed-legacy-backups",
+        help="Create the 'legacy-daily' + 'legacy-weekly-iis' BackupConfigs for an existing server+storage",
+    )
+    legacy.add_argument("--server-name", default="hetzner-windows")
+    legacy.add_argument("--storage-name",
+                        help="StorageConfig name (or --storage-id). If there's only one for the server — picked automatically.")
+    legacy.add_argument("--storage-id", type=int, help="Exact StorageConfig.id to use")
+
     args = parser.parse_args()
 
     if args.command == "import-hetzner-recovery":
@@ -211,6 +220,69 @@ def cli():
                 print("Seeded:")
                 for k, v in result.items():
                     print(f"  {k}: {v}")
+            await _dispose()
+
+        asyncio.run(_run())
+        sys.exit(0)
+
+    if args.command == "seed-legacy-backups":
+        from sqlalchemy import select
+        from serverpanel.application.importers.hetzner_recovery import (
+            _upsert_daily_backup,
+            _upsert_weekly_backup,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            dispose_db as _dispose,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            get_session_factory,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            init_db as _init,
+        )
+        from serverpanel.infrastructure.database.models import Server, StorageConfig
+
+        async def _run():
+            await _init()
+            async with get_session_factory()() as db:
+                srv = (await db.execute(
+                    select(Server).where(Server.name == args.server_name)
+                )).scalar_one_or_none()
+                if srv is None:
+                    sys.stderr.write(f"Server name={args.server_name!r} not found\n")
+                    sys.exit(2)
+
+                storages = (await db.execute(
+                    select(StorageConfig).where(StorageConfig.server_id == srv.id)
+                )).scalars().all()
+                if not storages:
+                    sys.stderr.write(f"No StorageConfig attached to server {srv.id}\n")
+                    sys.exit(2)
+
+                if args.storage_id:
+                    stor = next((s for s in storages if s.id == args.storage_id), None)
+                elif args.storage_name:
+                    stor = next((s for s in storages if s.name == args.storage_name), None)
+                elif len(storages) == 1:
+                    stor = storages[0]
+                else:
+                    sys.stderr.write(
+                        f"Server has {len(storages)} storages; pass --storage-id or --storage-name:\n"
+                    )
+                    for s in storages:
+                        sys.stderr.write(f"  id={s.id} name={s.name!r} type={s.storage_type}\n")
+                    sys.exit(2)
+
+                if stor is None:
+                    sys.stderr.write("Storage matching the given filter not found.\n")
+                    sys.exit(2)
+
+                daily_id = await _upsert_daily_backup(db, srv.id, stor.id)
+                weekly_id = await _upsert_weekly_backup(db, srv.id, stor.id)
+                await db.commit()
+                print(f"server_id={srv.id} storage_id={stor.id}")
+                print(f"backup_daily_id={daily_id} (name=legacy-daily)")
+                print(f"backup_weekly_id={weekly_id} (name=legacy-weekly-iis)")
             await _dispose()
 
         asyncio.run(_run())
