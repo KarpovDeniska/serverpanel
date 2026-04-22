@@ -2,6 +2,30 @@
 {% block title %}{{ config.name }} — {{ server.name }}{% endblock %}
 
 {% block content %}
+{# Toast banner read from ?toast=ok:message | err:message after a POST redirect. #}
+<div id="sp-toast" class="hidden mb-4 px-4 py-2 rounded border text-sm"></div>
+<script>
+(function () {
+    const q = new URLSearchParams(location.search).get("toast");
+    if (!q) return;
+    const [kind, ...rest] = q.split(":");
+    const msg = rest.join(":") || "";
+    const el = document.getElementById("sp-toast");
+    if (!el) return;
+    if (kind === "ok") {
+        el.className = "mb-4 px-4 py-2 rounded border text-sm bg-green-900/30 border-green-700 text-green-400";
+        el.textContent = "✅ " + msg;
+    } else {
+        el.className = "mb-4 px-4 py-2 rounded border text-sm bg-red-900/30 border-red-700 text-red-400 whitespace-pre-wrap";
+        el.textContent = "❌ " + msg;
+    }
+    // Strip ?toast from URL so refresh doesn't re-show.
+    const url = new URL(location.href);
+    url.searchParams.delete("toast");
+    history.replaceState({}, "", url.pathname + (url.search ? "?" + url.searchParams : "") + url.hash);
+})();
+</script>
+
 <div class="mb-6">
     <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
         <a href="/servers" class="hover:text-dark-accent">Серверы</a>

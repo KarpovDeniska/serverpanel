@@ -247,11 +247,17 @@ async def install_schedule(
 ):
     server = await _server_or_404(server_id, user, db)
     cfg = await _config_or_404(config_id, server, db)
+    base = f"/servers/{server_id}/backups/{cfg.id}"
     try:
         await BackupService(db).install_schedule(cfg)
     except Exception as e:
-        raise HTTPException(500, f"install_schedule failed: {e}") from e
-    return RedirectResponse(f"/servers/{server_id}/backups/{cfg.id}", status_code=302)
+        # Don't blow up the UI with a raw JSON 500; redirect back with a
+        # toast so the user sees WHAT failed in the same page they started on.
+        msg = str(e).replace("\n", " ").replace("\r", " ")[:500]
+        return RedirectResponse(f"{base}?toast=err:{msg}", status_code=302)
+    return RedirectResponse(
+        f"{base}?toast=ok:Schedule installed on target server", status_code=302
+    )
 
 
 @router.post("/{config_id}/uninstall")
@@ -263,11 +269,13 @@ async def uninstall_schedule(
 ):
     server = await _server_or_404(server_id, user, db)
     cfg = await _config_or_404(config_id, server, db)
+    base = f"/servers/{server_id}/backups/{cfg.id}"
     try:
         await BackupService(db).uninstall_schedule(cfg)
     except Exception as e:
-        raise HTTPException(500, f"uninstall_schedule failed: {e}") from e
-    return RedirectResponse(f"/servers/{server_id}/backups/{cfg.id}", status_code=302)
+        msg = str(e).replace("\n", " ").replace("\r", " ")[:500]
+        return RedirectResponse(f"{base}?toast=err:{msg}", status_code=302)
+    return RedirectResponse(f"{base}?toast=ok:Schedule removed from target server", status_code=302)
 
 
 # ---------------------------------------------------------------------------

@@ -485,13 +485,16 @@ class BackupService:
             elif trigger["kind"] == "monthly":
                 # New-ScheduledTaskTrigger has no -Monthly switch; build via CIM.
                 # Windows clamps day>28 to the last day of short months.
+                # DaysOfMonth is uint32[] — a scalar trips E_INVALIDARG
+                # (HRESULT 0x80070057) at Register-ScheduledTask time.
                 trigger_cmd = (
                     f"(New-CimInstance -CimClass (Get-CimClass "
                     f"-ClassName MSFT_TaskMonthlyTrigger "
                     f"-Namespace Root/Microsoft/Windows/TaskScheduler) "
                     f"-ClientOnly -Property @{{ "
-                    f"DaysOfMonth = [uint32]{trigger['day']}; "
-                    f"StartBoundary = (Get-Date '{trigger['at']}').ToString('s') }})"
+                    f"DaysOfMonth = [uint32[]]@({trigger['day']}); "
+                    f"StartBoundary = (Get-Date '{trigger['at']}').ToString('s'); "
+                    f"Enabled = $true }})"
                 )
             else:
                 raise ValueError(f"unreachable: {trigger}")
