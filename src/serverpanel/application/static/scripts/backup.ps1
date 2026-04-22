@@ -13,7 +13,10 @@ param(
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 $runId = (Get-Date).ToString("yyyyMMdd_HHmmss")
-$stagingRoot = Join-Path $env:ProgramData "serverpanel\staging\$runId"
+# Staging lives outside ProgramData\serverpanel so that a source pointing at
+# that directory (or any of its parents) does not end up copying staging into
+# itself on every iteration — robocopy /MIR would loop until the disk dies.
+$stagingRoot = Join-Path $env:TEMP "sp-staging\$runId"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 function Log($msg) {
@@ -118,7 +121,7 @@ function Stage-Source($src, $stageBase) {
     switch ($src.type) {
         "dir" {
             Ensure-Dir $stagePath
-            robocopy $src.path $stagePath /MIR /R:2 /W:5 /NP /NFL /NDL /NJH /NJS | Out-Null
+            robocopy $src.path $stagePath /MIR /R:2 /W:5 /NP /NFL /NDL /NJH /NJS /XD $stagingRoot | Out-Null
             if ($LASTEXITCODE -ge 8) { throw "robocopy exit $LASTEXITCODE" }
         }
         "file" {
