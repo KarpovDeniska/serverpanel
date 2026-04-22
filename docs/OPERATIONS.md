@@ -233,15 +233,25 @@ Run now → должно прийти ✅. Если нет — проверь `.
 
 ### Создать бэкап
 
+**Через UI (рекомендуемый способ):** `/settings` → секция «Резервная копия ServerPanel» → **⬇ Скачать архив**. Браузер откроет нативный диалог «Сохранить как…» — выбрать iCloud `Desktop/gefest/Сервер/` (рядом с `restore.command`).
+
+Требование: в настройках браузера должно быть включено «Спрашивать куда сохранять каждый файл» — иначе архив молча упадёт в `Downloads`. Пути:
+- Yandex: `browser://settings/downloads` → «Всегда спрашивать, куда сохранять файлы»
+- Safari: Settings → General → File download location → «Ask for each download»
+- Chrome: `chrome://settings/downloads` → «Ask where to save each file before downloading»
+
+**Вручную через CLI** (если uvicorn лежит):
 ```bash
 cd ~
-tar czf ~/Desktop/serverpanel-backup-$(date +%Y%m%d).tar.gz \
+tar czf "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Desktop/gefest/Сервер/serverpanel-backup-$(date +%Y%m%d-%H%M).tar.gz" \
   .ssh/serverpanel-seed \
   projects/serverpanel/.env \
   projects/serverpanel/data/serverpanel.db
 ```
 
-Получившийся `.tar.gz` положить в iCloud / Google Drive / внешний диск / 1Password. **Не** хранить единственную копию только на маке.
+**Что внутри архива:** `.env` (с `ENCRYPTION_KEY`, без которого БД — мусор), `data/serverpanel.db` (юзеры, серверы, конфиги, история, зашифрованные ключи), `~/.ssh/serverpanel-seed/` (plain SSH-ключи — страховка на случай потери `ENCRYPTION_KEY`).
+
+**Не** хранить единственную копию только на маке. iCloud + дополнительная копия в 1Password / внешний диск.
 
 ### Восстановить на новом маке
 

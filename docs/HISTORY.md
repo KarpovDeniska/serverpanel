@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-04-22 — Self-backup в UI
+
+- Новый сервис `application/services/self_backup_service.py:write_self_backup(fileobj)` — стримит tar.gz (`.env` + `data/serverpanel.db` + `~/.ssh/serverpanel-seed/`) в переданный binary stream. Имя файла через `suggested_filename()` (timestamp).
+- Роут `POST /settings/self-backup` → `StreamingResponse` с `Content-Disposition: attachment` → браузер показывает нативный «Сохранить как…» если в настройках включено «спрашивать куда сохранять». Никакой конфигурации пути на сервере, выбор папки — полностью на клиенте.
+- Кнопка **⬇ Скачать архив** в `templates/settings.html` под заголовком «Резервная копия ServerPanel» + подсказка про включение download-prompt в браузере.
+- Тесты: 27 passed (импорт-смоук работает, функциональный тест скачивания не добавлял — тривиальная обёртка над tarfile).
+
 ## 2026-04-22 — disaster recovery для мака
 
 - `scripts/bootstrap-mac.sh` — one-command setup: Xcode CLT, Homebrew, python@3.12, clone, venv, pip install, опциональная распаковка tar-архива через `SERVERPANEL_BACKUP_TAR=`, LaunchAgent, health-check. Идемпотентный. Генерит свежий `.env` если архив не задан.
