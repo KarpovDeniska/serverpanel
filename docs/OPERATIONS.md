@@ -8,6 +8,23 @@
 
 Предполагается что на целевом Windows-сервере уже что-то работает (либо это рабочий сервер с 1С, либо ты его только что развернул вручную).
 
+### 1.0-auto. Всё одним скриптом (рекомендуемый путь)
+
+В репе лежит [scripts/bootstrap-mac.sh](../scripts/bootstrap-mac.sh) — ставит CLT + brew + python@3.12, клонирует репо, создаёт venv, опционально распаковывает твой tar-архив, генерирует `.env` (если его нет), прописывает LaunchAgent, проверяет `/health`.
+
+С восстановлением из архива:
+```bash
+curl -fsSL https://raw.githubusercontent.com/KarpovDeniska/serverpanel/main/scripts/bootstrap-mac.sh -o /tmp/bootstrap-mac.sh
+SERVERPANEL_BACKUP_TAR=~/Downloads/serverpanel-backup-20260422.tar.gz bash /tmp/bootstrap-mac.sh
+```
+
+С нуля (без архива — ключи и конфиги придётся завести руками после):
+```bash
+curl -fsSL https://raw.githubusercontent.com/KarpovDeniska/serverpanel/main/scripts/bootstrap-mac.sh | bash
+```
+
+Если предпочитаешь делать шагами — читай §1.0…§1.8 ниже. Скрипт делает ровно те же действия.
+
 ### 1.0. Системные зависимости (голый мак)
 
 На чистой macOS нет ни `git`, ни `python3.12`, ни компиляторов для `cryptography`/`bcrypt`. Поставить всё за один проход:
