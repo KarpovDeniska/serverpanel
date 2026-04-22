@@ -203,7 +203,7 @@
                 <form method="post" action="/servers/{{ server.id }}/backups/sync" class="leading-none">
                     <input type="hidden" name="next" value="/servers/{{ server.id }}">
                     <button type="submit"
-                            class="text-xs text-dark-muted hover:text-dark-accent"
+                            class="px-2 py-1 bg-dark-bg border border-dark-border rounded text-xs text-dark-muted hover:text-dark-accent hover:border-dark-accent transition-colors"
                             title="Подтянуть отчёты Task Scheduler с сервера">⟲ sync</button>
                 </form>
                 <span class="w-2.5 h-2.5 rounded-full {{ dot_color }}"></span>
