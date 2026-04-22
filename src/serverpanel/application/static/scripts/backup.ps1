@@ -262,16 +262,35 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
             $sftpOptsBase += @("-i", $keyFile)
         }
 
-        # Helper: run sftp with a one-shot batch file and always delete it.
+        # Helper: run sftp with a batch file via Start-Process (fully detached
+        # stdio). Calling `& sftp ...` from PowerShell under an SSH session on
+        # Windows Server hangs because inherited stdin/stdout pipes from sshd
+        # never close. Start-Process with explicit file redirects sidesteps
+        # that entirely.
         $RunSftpBatch = {
             param($batchText)
             $batchFile = Join-Path $env:TEMP ("sp_sftp_" + [Guid]::NewGuid().ToString("N") + ".batch")
+            $outFile = "$batchFile.out"
+            $errFile = "$batchFile.err"
             Write-Utf8 $batchFile $batchText
             try {
-                $out = & sftp @sftpOptsBase -b $batchFile "${sbUser}@${sbHost}" 2>&1
-                return ,$out
+                $args = $sftpOptsBase + @("-b", $batchFile, "${sbUser}@${sbHost}")
+                $proc = Start-Process -FilePath 'C:\Windows\System32\OpenSSH\sftp.exe' `
+                    -ArgumentList $args `
+                    -NoNewWindow -Wait -PassThru `
+                    -RedirectStandardOutput $outFile `
+                    -RedirectStandardError $errFile
+                $stdout = if (Test-Path $outFile) { Get-Content $outFile -Raw } else { "" }
+                $stderr = if (Test-Path $errFile) { Get-Content $errFile -Raw } else { "" }
+                $script:LASTEXITCODE = $proc.ExitCode
+                $combined = @()
+                if ($stdout) { $combined += ($stdout -split "`r?`n") }
+                if ($stderr) { $combined += ($stderr -split "`r?`n") }
+                return ,$combined
             } finally {
                 Remove-Item -LiteralPath $batchFile -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
             }
         }
 
@@ -288,6 +307,27 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         }
         & $RunSftpBatch $mkdirBatch | Out-Null
 
+        # Same inherited-stdio problem applies to scp — wrap it in Start-Process.
+        $RunScp = {
+            param([string]$local, [string]$remote, [bool]$recursive)
+            $outFile = Join-Path $env:TEMP ("sp_scp_" + [Guid]::NewGuid().ToString("N") + ".out")
+            $errFile = "$outFile.err"
+            try {
+                $scpArgs = @()
+                if ($recursive) { $scpArgs += "-r" }
+                $scpArgs = $sshOpts + $scpArgs + @($local, "${sbUser}@${sbHost}:${remote}")
+                $proc = Start-Process -FilePath 'C:\Windows\System32\OpenSSH\scp.exe' `
+                    -ArgumentList $scpArgs `
+                    -NoNewWindow -Wait -PassThru `
+                    -RedirectStandardOutput $outFile `
+                    -RedirectStandardError $errFile
+                return $proc.ExitCode
+            } finally {
+                Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+
         $aliases = if ($dest.aliases.Count -eq 0) { @($sourcesByAlias.Keys) } else { @($dest.aliases) }
         foreach ($alias in $aliases) {
             $src = $sourcesByAlias[$alias]
@@ -302,12 +342,8 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
                 $sz = Get-PathSize $staged
 
                 $isDir = (Get-Item -LiteralPath $staged).PSIsContainer
-                if ($isDir) {
-                    & scp @sshOpts -r $staged "${sbUser}@${sbHost}:$remoteTarget" 2>&1 | Out-Null
-                } else {
-                    & scp @sshOpts $staged "${sbUser}@${sbHost}:$remoteTarget" 2>&1 | Out-Null
-                }
-                if ($LASTEXITCODE -ne 0) { throw "scp exit $LASTEXITCODE" }
+                $scpExit = & $RunScp $staged $remoteTarget $isDir
+                if ($scpExit -ne 0) { throw "scp exit $scpExit" }
 
                 $rec.items += @{ alias = $alias; status = "success"; remote_path = $remoteTarget; size_bytes = $sz }
                 $rec.size_bytes += $sz
