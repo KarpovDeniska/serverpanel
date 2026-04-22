@@ -34,6 +34,10 @@ class ProviderRateLimitError(ProviderError):
     """Rate limit exceeded."""
 
 
+class ProviderConfigError(ProviderError):
+    """Provider is not configured correctly (missing creds, bad server id, etc.)."""
+
+
 class SSHError(ServerPanelError):
     """SSH connection or command errors."""
 

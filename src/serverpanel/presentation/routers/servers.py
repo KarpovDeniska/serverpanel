@@ -195,6 +195,7 @@ async def server_status(
     status_data = {
         "online": False,
         "api_status": "unknown",
+        "api_hint": None,
         "is_rescue": False,
         "ports": {},
     }
@@ -212,14 +213,36 @@ async def server_status(
         status_data["online"] = any(r is True for r in port_checks)
 
     # Check via provider API
+    from serverpanel.domain.exceptions import (
+        ProviderAuthError,
+        ProviderConfigError,
+        ProviderError,
+    )
+
     try:
         provider = _get_provider_for_server(server)
         srv_status = await provider.get_server_status(server.provider_server_id)
         status_data["api_status"] = srv_status.status
         status_data["is_rescue"] = srv_status.is_rescue
         await provider.close()
+    except ProviderConfigError as e:
+        status_data["api_status"] = "not configured"
+        status_data["api_hint"] = str(e)
+    except ProviderAuthError:
+        status_data["api_status"] = "auth failed"
+        status_data["api_hint"] = (
+            "Provider credentials rejected. Check webservice login/password."
+        )
+    except ProviderError as e:
+        status_data["api_status"] = "provider error"
+        status_data["api_hint"] = str(e)
     except Exception as e:
-        status_data["api_status"] = f"error: {e}"
+        import logging
+        logging.getLogger(__name__).warning(
+            "provider status probe failed for server %s", server.id, exc_info=True,
+        )
+        status_data["api_status"] = "unavailable"
+        status_data["api_hint"] = f"{type(e).__name__}: {e}"
 
     return templates.TemplateResponse(request, "partials/server_status.html", {
         "server": server,

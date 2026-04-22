@@ -11,10 +11,18 @@
     </div>
 
     <!-- API Status -->
-    <div class="flex justify-between">
+    <div class="flex justify-between gap-2">
         <span class="text-dark-muted">API статус</span>
-        <span>{{ status.api_status }}</span>
+        {% set api = status.api_status %}
+        <span class="{% if api in ('ready','running','active') %}text-green-400{% elif api in ('not configured','unknown') %}text-dark-muted{% else %}text-yellow-400{% endif %}">
+            {{ api }}
+        </span>
     </div>
+    {% if status.api_hint %}
+    <div class="text-xs text-dark-muted bg-dark-bg border border-dark-border rounded px-2 py-1 leading-snug">
+        {{ status.api_hint }}
+    </div>
+    {% endif %}
 
     <!-- Rescue mode -->
     {% if status.is_rescue %}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from serverpanel.domain.enums import Capability
+from serverpanel.domain.exceptions import ProviderConfigError
 from serverpanel.domain.models import (
     FirewallRule,
     IPAddress,
@@ -15,6 +16,24 @@ from serverpanel.domain.models import (
     TrafficData,
 )
 from serverpanel.infrastructure.providers.hetzner.robot_api import HetznerRobotAPI
+
+
+def _to_robot_id(server_id: str) -> int:
+    """Validate that `server_id` is a Robot numeric id.
+
+    Robot identifies servers by integer `server_number`, NOT by IP. When the
+    panel was seeded without Robot webservice credentials, `provider_server_id`
+    contains the IP as a placeholder — in that case API calls must fail with a
+    clear message rather than a raw ValueError.
+    """
+    try:
+        return int(server_id)
+    except (TypeError, ValueError) as e:
+        raise ProviderConfigError(
+            f"Hetzner Robot requires numeric server id, got {server_id!r}. "
+            "Add Robot webservice credentials and re-import the server so its real ID is fetched.",
+            provider="hetzner",
+        ) from e
 
 
 class HetznerDedicatedProvider:
@@ -36,6 +55,12 @@ class HetznerDedicatedProvider:
     }
 
     def __init__(self, robot_user: str, robot_password: str, **kwargs):
+        if not robot_user or not robot_password:
+            raise ProviderConfigError(
+                "Hetzner Robot webservice credentials are not set. "
+                "Add a webservice login (starts with '#ws+') and password in provider settings.",
+                provider="hetzner",
+            )
         self._api = HetznerRobotAPI(robot_user, robot_password)
 
     @property
@@ -66,7 +91,7 @@ class HetznerDedicatedProvider:
         ]
 
     async def get_server(self, server_id: str) -> ServerInfo:
-        data = await self._api.get_server(int(server_id))
+        data = await self._api.get_server(_to_robot_id(server_id))
         s = data.get("server", data)
         return ServerInfo(
             server_id=str(s.get("server_number", server_id)),
@@ -78,9 +103,9 @@ class HetznerDedicatedProvider:
         )
 
     async def get_server_status(self, server_id: str) -> ServerStatus:
-        data = await self._api.get_server(int(server_id))
+        data = await self._api.get_server(_to_robot_id(server_id))
         s = data.get("server", data)
-        rescue = await self._api.get_rescue(int(server_id))
+        rescue = await self._api.get_rescue(_to_robot_id(server_id))
         return ServerStatus(
             server_id=server_id,
             status=s.get("status", "unknown"),
@@ -90,11 +115,11 @@ class HetznerDedicatedProvider:
     # --- Power management ---
 
     async def reset_server(self, server_id: str, reset_type: str) -> ResetResult:
-        await self._api.reset_server(int(server_id), reset_type)
+        await self._api.reset_server(_to_robot_id(server_id), reset_type)
         return ResetResult(server_id=server_id, reset_type=reset_type)
 
     async def wake_on_lan(self, server_id: str) -> None:
-        await self._api.wake_on_lan(int(server_id))
+        await self._api.wake_on_lan(_to_robot_id(server_id))
 
     # --- Rescue mode ---
 
@@ -105,7 +130,7 @@ class HetznerDedicatedProvider:
         arch: int = 64,
         authorized_keys: list[str] | None = None,
     ) -> RescueInfo:
-        data = await self._api.activate_rescue(int(server_id), os, arch, authorized_keys)
+        data = await self._api.activate_rescue(_to_robot_id(server_id), os, arch, authorized_keys)
         r = data.get("rescue", data)
         return RescueInfo(
             active=True,
@@ -115,10 +140,10 @@ class HetznerDedicatedProvider:
         )
 
     async def deactivate_rescue(self, server_id: str) -> None:
-        await self._api.deactivate_rescue(int(server_id))
+        await self._api.deactivate_rescue(_to_robot_id(server_id))
 
     async def get_rescue_status(self, server_id: str) -> RescueInfo:
-        data = await self._api.get_rescue(int(server_id))
+        data = await self._api.get_rescue(_to_robot_id(server_id))
         r = data.get("rescue", data)
         return RescueInfo(
             active=r.get("active", False),
@@ -130,7 +155,7 @@ class HetznerDedicatedProvider:
     # --- Network ---
 
     async def get_ips(self, server_id: str) -> list[IPAddress]:
-        data = await self._api.get_ips(int(server_id))
+        data = await self._api.get_ips(_to_robot_id(server_id))
         return [
             IPAddress(
                 ip=item["ip"]["ip"],
@@ -152,7 +177,7 @@ class HetznerDedicatedProvider:
     # --- Firewall ---
 
     async def get_firewall_rules(self, server_id: str) -> list[FirewallRule]:
-        data = await self._api.get_firewall(int(server_id))
+        data = await self._api.get_firewall(_to_robot_id(server_id))
         rules = data.get("firewall", {}).get("rules", {}).get("input", [])
         return [
             FirewallRule(
@@ -196,7 +221,7 @@ class HetznerDedicatedProvider:
     # --- Traffic ---
 
     async def get_traffic(self, server_id: str, period: str = "month") -> TrafficData:
-        data = await self._api.get_traffic(int(server_id))
+        data = await self._api.get_traffic(_to_robot_id(server_id))
         t = data.get("traffic", {})
         return TrafficData(
             server_id=server_id,
