@@ -51,8 +51,9 @@ LEGACY_DAILY_SOURCES: list[dict[str, Any]] = [
     {"alias": "1c_obrabotki",         "type": "dir",     "path": r"D:\1С\Обработки",            "compress": "none"},
     {"alias": "rutoken",              "type": "dir",     "path": r"D:\Soft\rutoken",            "compress": "none"},
     {"alias": "1c_licenses_archive",  "type": "dir",     "path": r"D:\Soft\Лицензии 1С",        "compress": "none"},
-    {"alias": "xray_config",          "type": "file",    "path": r"D:\Personal folders\dkarpov\projects\tools\xray\config_xhttp.json", "compress": "none"},
-    {"alias": "xray_winsw",           "type": "file",    "path": r"D:\Personal folders\dkarpov\projects\tools\xray\WinSW.xml",         "compress": "none"},
+    # Whole xray tree — binary + configs + WinSW. Restoring just configs
+     # means re-downloading the binary manually, which defeats the point.
+    {"alias": "tools_xray",           "type": "dir",     "path": r"D:\Personal folders\dkarpov\projects\tools\xray", "compress": "none"},
 ]
 
 # Weekly — IIS config (Stage 1 + Sunday block in upload_storagebox.ps1).
@@ -308,7 +309,7 @@ async def _upsert_weekly_backup(
             sources=LEGACY_WEEKLY_SOURCES,
             destinations=destinations,
             schedule="weekly:Sun@04:00",
-            rotation_days=28,
+            rotation_days=180,  # IIS configs rarely change; keep half a year of history
         )
         db.add(row)
         await db.flush()
