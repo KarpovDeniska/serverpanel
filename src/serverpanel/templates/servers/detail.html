@@ -193,14 +193,23 @@
       {% set card_border = "border-green-800" %}
       {% set dot_color = "bg-green-500" %}
     {% endif %}
-    <a href="/servers/{{ server.id }}/backups"
-       class="bg-dark-card border rounded-lg p-5 hover:border-dark-accent transition-colors {{ card_border }}">
+    <div class="bg-dark-card border rounded-lg p-5 {{ card_border }}">
         <div class="flex items-center justify-between mb-2">
-            <h3 class="font-semibold text-dark-muted text-sm uppercase tracking-wide">Бэкапы</h3>
-            <span class="w-2.5 h-2.5 rounded-full {{ dot_color }}"></span>
+            <a href="/servers/{{ server.id }}/backups"
+               class="font-semibold text-dark-muted text-sm uppercase tracking-wide hover:text-dark-accent">
+                Бэкапы →
+            </a>
+            <div class="flex items-center gap-2">
+                <form method="post" action="/servers/{{ server.id }}/backups/sync" class="leading-none">
+                    <button type="submit"
+                            class="text-xs text-dark-muted hover:text-dark-accent"
+                            title="Подтянуть отчёты Task Scheduler с сервера">⟲ sync</button>
+                </form>
+                <span class="w-2.5 h-2.5 rounded-full {{ dot_color }}"></span>
+            </div>
         </div>
         {% if not bs or bs.configs_count == 0 %}
-        <p class="text-sm text-dark-muted">Ничего не настроено. Кликни чтобы создать первый.</p>
+        <p class="text-sm text-dark-muted">Ничего не настроено. <a href="/servers/{{ server.id }}/backups" class="text-dark-accent hover:underline">Создать первый →</a></p>
         {% else %}
         <div class="text-xs space-y-1">
             <div class="text-dark-text">{{ bs.configs_count }} конфиг(ов)</div>
@@ -220,7 +229,7 @@
             {% endif %}
         </div>
         {% endif %}
-    </a>
+    </div>
 
     <!-- Recovery -->
     <a href="/servers/{{ server.id }}/recovery"
