@@ -31,6 +31,24 @@
     {% endif %}
 </div>
 
+<!-- Self-backup -->
+<div class="mb-8">
+    <h3 class="text-lg font-semibold mb-4">Резервная копия ServerPanel</h3>
+    <div class="bg-dark-card border border-dark-border rounded-lg p-4">
+        <p class="text-sm text-dark-muted mb-3">
+            Создаёт <code>tar.gz</code> с <code>.env</code>, <code>data/serverpanel.db</code> и <code>~/.ssh/serverpanel-seed/</code> — всё что нужно для восстановления на новом маке через <code>restore.command</code>. Браузер спросит куда сохранить.
+        </p>
+        <p class="text-xs text-dark-muted mb-3">
+            Если сохраняется без диалога — включи в настройках браузера «Спрашивать куда сохранять каждый файл» и сложи архив в iCloud рядом с <code>restore.command</code>.
+        </p>
+        <form method="post" action="/settings/self-backup">
+            <button type="submit" class="px-4 py-2 bg-dark-accent text-white rounded hover:opacity-90 transition-opacity">
+                ⬇ Скачать архив
+            </button>
+        </form>
+    </div>
+</div>
+
 <!-- User info -->
 <div>
     <h3 class="text-lg font-semibold mb-4">Аккаунт</h3>

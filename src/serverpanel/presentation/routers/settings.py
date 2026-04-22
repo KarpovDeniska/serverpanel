@@ -1,9 +1,16 @@
 """Settings routes."""
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+import io
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from serverpanel.application.services.self_backup_service import (
+    SelfBackupError,
+    suggested_filename,
+    write_self_backup,
+)
 from serverpanel.infrastructure.database.models import User
 from serverpanel.infrastructure.database.repositories.servers import ProviderConfigRepository
 from serverpanel.infrastructure.providers import list_provider_types
@@ -25,3 +32,18 @@ async def settings_page(
         "providers": providers,
         "provider_types": list_provider_types(),
     })
+
+
+@router.post("/self-backup")
+async def self_backup(user: User = Depends(get_current_user)) -> StreamingResponse:
+    buf = io.BytesIO()
+    try:
+        write_self_backup(buf)
+    except SelfBackupError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="{suggested_filename()}"'},
+    )
