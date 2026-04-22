@@ -2,15 +2,47 @@
 {% block title %}Dashboard — ServerPanel{% endblock %}
 
 {% block content %}
+{# Toast after POST redirects. #}
+<div id="sp-toast" class="hidden mb-4 px-4 py-2 rounded border text-sm"></div>
+<script>
+(function () {
+    const q = new URLSearchParams(location.search).get("toast");
+    if (!q) return;
+    const [kind, ...rest] = q.split(":");
+    const msg = rest.join(":") || "";
+    const el = document.getElementById("sp-toast");
+    if (!el) return;
+    if (kind === "ok") {
+        el.className = "mb-4 px-4 py-2 rounded border text-sm bg-green-900/30 border-green-700 text-green-400";
+        el.textContent = "✅ " + msg;
+    } else {
+        el.className = "mb-4 px-4 py-2 rounded border text-sm bg-red-900/30 border-red-700 text-red-400 whitespace-pre-wrap";
+        el.textContent = "❌ " + msg;
+    }
+    const url = new URL(location.href);
+    url.searchParams.delete("toast");
+    history.replaceState({}, "", url.pathname + (url.search ? "?" + url.searchParams : "") + url.hash);
+})();
+</script>
+
 <div class="flex items-center justify-between mb-6">
     <div>
         <h2 class="text-2xl font-bold">Dashboard</h2>
         <p class="text-dark-muted mt-1">Обзор серверов</p>
     </div>
-    <a href="/servers/add"
-       class="bg-dark-accent text-white rounded px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
-        + Добавить
-    </a>
+    <div class="flex gap-2">
+        <form method="post" action="/dashboard/backups/sync-all">
+            <button type="submit"
+                    class="px-3 py-2 bg-dark-bg border border-dark-border text-dark-text rounded hover:border-dark-accent hover:text-dark-accent text-sm"
+                    title="Подтянуть отчёты Task Scheduler-запусков со всех серверов">
+                ⟲ Sync backups
+            </button>
+        </form>
+        <a href="/servers/add"
+           class="bg-dark-accent text-white rounded px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+            + Добавить
+        </a>
+    </div>
 </div>
 
 {% if servers %}
@@ -37,6 +69,35 @@
         <div id="status-{{ server.id }}" class="mt-3 pt-3 border-t border-dark-border">
             <p class="text-xs text-dark-muted">Загрузка...</p>
         </div>
+
+        {% set bs = backup_summaries.get(server.id) %}
+        {% if bs and bs.configs_count > 0 %}
+          {% set c = bs.counts %}
+          {% if c.get('failed', 0) %}
+            {% set dot = 'bg-red-500' %}
+          {% elif c.get('partial', 0) or c.get('never', 0) or c.get('pending', 0) %}
+            {% set dot = 'bg-yellow-500' %}
+          {% elif c.get('running', 0) %}
+            {% set dot = 'bg-blue-500 animate-pulse' %}
+          {% else %}
+            {% set dot = 'bg-green-500' %}
+          {% endif %}
+        <a href="/servers/{{ server.id }}/backups"
+           class="mt-3 pt-3 border-t border-dark-border flex items-center justify-between text-xs hover:text-dark-accent transition-colors">
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full {{ dot }}"></span>
+                <span class="text-dark-muted">Бэкапы:</span>
+                {% if c.get('success', 0) %}<span class="text-green-400">✓{{ c['success'] }}</span>{% endif %}
+                {% if c.get('partial', 0) %}<span class="text-yellow-400">⚠{{ c['partial'] }}</span>{% endif %}
+                {% if c.get('failed',  0) %}<span class="text-red-400">✕{{ c['failed'] }}</span>{% endif %}
+                {% if c.get('running', 0) %}<span class="text-blue-400">⟳{{ c['running'] }}</span>{% endif %}
+                {% if c.get('never',   0) %}<span class="text-dark-muted">—{{ c['never'] }}</span>{% endif %}
+            </div>
+            {% if bs.latest %}
+            <span class="text-dark-muted">{{ bs.latest.started_at.strftime('%d.%m %H:%M') }}</span>
+            {% endif %}
+        </a>
+        {% endif %}
     </div>
     {% endfor %}
 </div>
