@@ -35,159 +35,184 @@
         frequency: "daily",
     });
 
-    function inputEl(kind, name, value, opts = {}) {
-        const el = document.createElement(kind);
-        el.className = "bg-dark-bg border border-dark-border rounded px-2 py-1 text-xs";
-        if (opts.full) el.className += " w-full";
-        el.dataset.field = name;
-        if (kind === "input") {
-            el.type = opts.type || "text";
-            if (opts.placeholder) el.placeholder = opts.placeholder;
+    // -----------------------------------------------------------------------
+    // Primitives
+    // -----------------------------------------------------------------------
+
+    function makeInput({ value, placeholder, type = "text" }) {
+        const el = document.createElement("input");
+        el.type = type;
+        el.className = "w-full bg-dark-bg border border-dark-border rounded px-2 py-1 text-xs";
+        if (placeholder) el.placeholder = placeholder;
+        if (type === "checkbox") {
+            el.checked = !!value;
+            el.className = "bg-dark-bg border border-dark-border rounded";
+        } else {
             el.value = value == null ? "" : value;
-        } else if (kind === "select") {
-            (opts.options || []).forEach((opt) => {
-                const o = document.createElement("option");
-                if (typeof opt === "object") {
-                    o.value = opt.value;
-                    o.textContent = opt.label;
-                } else {
-                    o.value = o.textContent = opt;
-                }
-                if (String(opt.value ?? opt) === String(value)) o.selected = true;
-                el.appendChild(o);
-            });
         }
         return el;
     }
 
-    function label(text) {
-        const l = document.createElement("span");
-        l.className = "text-xs text-dark-muted";
-        l.textContent = text;
-        return l;
+    function makeSelect({ value, options }) {
+        const el = document.createElement("select");
+        el.className = "w-full bg-dark-bg border border-dark-border rounded px-2 py-1 text-xs";
+        options.forEach((opt) => {
+            const o = document.createElement("option");
+            if (typeof opt === "object") {
+                o.value = opt.value;
+                o.textContent = opt.label;
+            } else {
+                o.value = o.textContent = opt;
+            }
+            if (String(opt.value ?? opt) === String(value)) o.selected = true;
+            el.appendChild(o);
+        });
+        return el;
+    }
+
+    function field(labelText, inputEl, { span = 1 } = {}) {
+        const wrap = document.createElement("div");
+        wrap.className = `col-span-${span}`;
+        const lbl = document.createElement("div");
+        lbl.className = "text-[10px] uppercase tracking-wide text-dark-muted mb-1";
+        lbl.textContent = labelText;
+        wrap.appendChild(lbl);
+        wrap.appendChild(inputEl);
+        return wrap;
     }
 
     function removeBtn(onClick) {
         const b = document.createElement("button");
         b.type = "button";
         b.textContent = "✕";
-        b.className = "text-xs text-red-400 hover:text-red-300 px-2";
+        b.className = "text-xs text-red-400 hover:text-red-300 px-2 py-1";
         b.addEventListener("click", onClick);
         return b;
     }
 
-    function rowWrap(children) {
-        const row = document.createElement("div");
-        row.className = "bg-dark-card border border-dark-border rounded p-2 flex flex-wrap items-center gap-2";
-        children.forEach((c) => row.appendChild(c));
-        return row;
+    function rowCard(badgeText, gridChildren, delBtn) {
+        const card = document.createElement("div");
+        card.className = "bg-dark-card border border-dark-border rounded p-3";
+
+        const header = document.createElement("div");
+        header.className = "flex items-center justify-between mb-2";
+        const badge = document.createElement("span");
+        badge.className = "text-xs font-semibold text-dark-accent";
+        badge.textContent = badgeText;
+        header.appendChild(badge);
+        header.appendChild(delBtn);
+        card.appendChild(header);
+
+        const grid = document.createElement("div");
+        grid.className = "grid grid-cols-12 gap-2";
+        gridChildren.forEach((c) => grid.appendChild(c));
+        card.appendChild(grid);
+        return card;
     }
+
+    // -----------------------------------------------------------------------
+    // Row renderers
+    // -----------------------------------------------------------------------
 
     function renderSource(src, idx) {
-        const alias = inputEl("input", "alias", src.alias, { placeholder: "alias (UNF, wwwroot…)" });
-        const type = inputEl("select", "type", src.type, { options: SOURCE_TYPES });
-        const path = inputEl("input", "path", src.path, { placeholder: "C:\\Users или /var/lib", full: true });
-        path.className += " flex-1 min-w-[200px]";
-        const compress = inputEl("select", "compress", src.compress || "none", { options: COMPRESS_KINDS });
+        const alias = makeInput({ value: src.alias, placeholder: "UNF, wwwroot…" });
+        const type = makeSelect({ value: src.type, options: SOURCE_TYPES });
+        const path = makeInput({ value: src.path, placeholder: "C:\\Users или /var/lib" });
+        const compress = makeSelect({ value: src.compress || "none", options: COMPRESS_KINDS });
+
+        alias.addEventListener("input", () => { src.alias = alias.value; sync(); });
+        type.addEventListener("change", () => { src.type = type.value; sync(); });
+        path.addEventListener("input", () => { src.path = path.value; sync(); });
+        compress.addEventListener("change", () => { src.compress = compress.value; sync(); });
+
         const del = removeBtn(() => { state.sources.splice(idx, 1); render(); });
-
-        [alias, type, path, compress].forEach((el) => {
-            el.addEventListener("input", () => {
-                src[el.dataset.field] = el.value;
-                sync();
-            });
-            el.addEventListener("change", () => {
-                src[el.dataset.field] = el.value;
-                sync();
-            });
-        });
-
-        return rowWrap([label("#" + (idx + 1)), alias, type, path, compress, del]);
+        return rowCard(
+            `Source #${idx + 1}`,
+            [
+                field("alias", alias, { span: 3 }),
+                field("type", type, { span: 2 }),
+                field("path", path, { span: 5 }),
+                field("compress", compress, { span: 2 }),
+            ],
+            del,
+        );
     }
 
-    function aliasesInput(dest) {
-        const el = inputEl(
-            "input", "aliases",
-            (dest.aliases || []).join(","),
-            { placeholder: "aliases: empty = все, иначе через запятую", full: true },
-        );
+    function renderAliases(dest) {
+        const el = makeInput({
+            value: (dest.aliases || []).join(","),
+            placeholder: "пусто = все источники, либо через запятую",
+        });
         el.addEventListener("input", () => {
             dest.aliases = el.value.split(",").map((s) => s.trim()).filter(Boolean);
             sync();
         });
-        return el;
+        return field("aliases", el, { span: 12 });
     }
 
     function renderLocal(dest, idx) {
-        const base = inputEl("input", "base_path", dest.base_path, { placeholder: "D:\\backups", full: true });
-        base.className += " flex-1 min-w-[200px]";
+        const base = makeInput({ value: dest.base_path, placeholder: "D:\\backups" });
+        const dateFolder = makeInput({ type: "checkbox", value: dest.date_folder });
+        const rot = makeInput({ type: "number", value: dest.rotation_days, placeholder: "например 14" });
+
         base.addEventListener("input", () => { dest.base_path = base.value; sync(); });
-
-        const dateFolder = inputEl("input", "date_folder", null, { type: "checkbox" });
-        dateFolder.checked = !!dest.date_folder;
         dateFolder.addEventListener("change", () => { dest.date_folder = dateFolder.checked; sync(); });
-
-        const rot = inputEl("input", "rotation_days", dest.rotation_days, { type: "number", placeholder: "rot days (опц)" });
-        rot.className += " w-24";
         rot.addEventListener("input", () => {
             dest.rotation_days = rot.value === "" ? null : parseInt(rot.value, 10);
             sync();
         });
 
         const del = removeBtn(() => { state.destinations.splice(idx, 1); render(); });
-
-        const row = rowWrap([label("local #" + (idx + 1)), base, label("date_folder"), dateFolder, rot, del]);
-        const row2 = document.createElement("div");
-        row2.className = "mt-1";
-        row2.appendChild(aliasesInput(dest));
-        const wrap = document.createElement("div");
-        wrap.appendChild(row);
-        wrap.appendChild(row2);
-        return wrap;
+        return rowCard(
+            `Local destination #${idx + 1}`,
+            [
+                field("base_path", base, { span: 7 }),
+                field("date folder", dateFolder, { span: 2 }),
+                field("rotation days", rot, { span: 3 }),
+                renderAliases(dest),
+            ],
+            del,
+        );
     }
 
     function renderStorage(dest, idx) {
         const storageOpts = storages.map((s) => ({
             value: s.id, label: `#${s.id} ${s.name} (${s.type})`,
         }));
-        const storage = inputEl("select", "storage_config_id", dest.storage_config_id, { options: storageOpts });
+        const storage = makeSelect({ value: dest.storage_config_id, options: storageOpts });
+        const base = makeInput({ value: dest.base_path, placeholder: "backups/daily" });
+        const freq = makeSelect({ value: dest.frequency, options: FREQUENCIES });
+        const dateFolder = makeInput({ type: "checkbox", value: dest.date_folder });
+        const rot = makeInput({ type: "number", value: dest.rotation_days, placeholder: "например 14" });
+
         storage.addEventListener("change", () => {
             dest.storage_config_id = parseInt(storage.value, 10);
             sync();
         });
-
-        const base = inputEl("input", "base_path", dest.base_path, { placeholder: "backups/daily" });
-        base.className += " flex-1 min-w-[160px]";
         base.addEventListener("input", () => { dest.base_path = base.value; sync(); });
-
-        const freq = inputEl("select", "frequency", dest.frequency, { options: FREQUENCIES });
         freq.addEventListener("change", () => { dest.frequency = freq.value; sync(); });
-
-        const dateFolder = inputEl("input", "date_folder", null, { type: "checkbox" });
-        dateFolder.checked = !!dest.date_folder;
         dateFolder.addEventListener("change", () => { dest.date_folder = dateFolder.checked; sync(); });
-
-        const rot = inputEl("input", "rotation_days", dest.rotation_days, { type: "number", placeholder: "rot" });
-        rot.className += " w-20";
         rot.addEventListener("input", () => {
             dest.rotation_days = rot.value === "" ? null : parseInt(rot.value, 10);
             sync();
         });
 
         const del = removeBtn(() => { state.destinations.splice(idx, 1); render(); });
-
-        const row = rowWrap([
-            label("storage #" + (idx + 1)), storage, base, freq,
-            label("date_folder"), dateFolder, rot, del,
-        ]);
-        const row2 = document.createElement("div");
-        row2.className = "mt-1";
-        row2.appendChild(aliasesInput(dest));
-        const wrap = document.createElement("div");
-        wrap.appendChild(row);
-        wrap.appendChild(row2);
-        return wrap;
+        return rowCard(
+            `Storage destination #${idx + 1}`,
+            [
+                field("storage", storage, { span: 4 }),
+                field("base_path", base, { span: 4 }),
+                field("frequency", freq, { span: 2 }),
+                field("date folder", dateFolder, { span: 1 }),
+                field("rotation", rot, { span: 1 }),
+                renderAliases(dest),
+            ],
+            del,
+        );
     }
+
+    // -----------------------------------------------------------------------
 
     function render() {
         listsEl.sources.innerHTML = "";
