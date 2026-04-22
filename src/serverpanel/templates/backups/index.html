@@ -35,11 +35,13 @@
                 <th class="text-left px-4 py-2">Ротация</th>
                 <th class="text-left px-4 py-2">Источников</th>
                 <th class="text-left px-4 py-2">Назначений</th>
+                <th class="text-left px-4 py-2">Последний запуск</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             {% for c in configs %}
+            {% set last = latest_by_config.get(c.id) %}
             <tr class="border-t border-dark-border">
                 <td class="px-4 py-2">
                     <a href="/servers/{{ server.id }}/backups/{{ c.id }}" class="text-dark-accent hover:underline">{{ c.name }}</a>
@@ -48,6 +50,34 @@
                 <td class="px-4 py-2">{{ c.rotation_days }} д</td>
                 <td class="px-4 py-2">{{ (c.sources or [])|length }}</td>
                 <td class="px-4 py-2">{{ (c.destinations or [])|length }}</td>
+                <td class="px-4 py-2">
+                    {% if last %}
+                      {% set status_str = last.status.value if last.status.value is defined else last.status %}
+                      {% set color = {
+                          'success': 'bg-green-500',
+                          'partial': 'bg-yellow-500',
+                          'failed':  'bg-red-500',
+                          'running': 'bg-blue-500 animate-pulse',
+                          'pending': 'bg-dark-muted',
+                      }.get(status_str, 'bg-dark-muted') %}
+                      {% set text_color = {
+                          'success': 'text-green-400',
+                          'partial': 'text-yellow-400',
+                          'failed':  'text-red-400',
+                          'running': 'text-blue-400',
+                          'pending': 'text-dark-muted',
+                      }.get(status_str, 'text-dark-muted') %}
+                      <div class="flex items-center gap-2">
+                          <span class="w-2 h-2 rounded-full {{ color }}"></span>
+                          <span class="{{ text_color }} text-xs">{{ status_str }}</span>
+                          <span class="text-xs text-dark-muted">·
+                              {{ last.started_at.strftime('%d.%m %H:%M') if last.started_at else '—' }}
+                          </span>
+                      </div>
+                    {% else %}
+                      <span class="text-xs text-dark-muted">— ни разу</span>
+                    {% endif %}
+                </td>
                 <td class="px-4 py-2 text-right">
                     <a href="/servers/{{ server.id }}/backups/{{ c.id }}" class="text-dark-muted hover:text-dark-accent text-xs">→</a>
                 </td>

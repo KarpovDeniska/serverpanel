@@ -72,11 +72,29 @@ async def list_backups(
     server = await _server_or_404(server_id, user, db)
     configs = await BackupConfigRepository(db).list_for_server(server.id)
     storages = await StorageConfigRepository(db).list_for_server(server.id)
+
+    # Latest BackupHistory per config → {config_id: history_row}. Single
+    # query (subquery on MAX(id) grouped by config_id) instead of N+1.
+    latest_by_config: dict[int, BackupHistory] = {}
+    if configs:
+        from sqlalchemy import func, select as _select
+        config_ids = [c.id for c in configs]
+        latest_ids_subq = (
+            _select(func.max(BackupHistory.id))
+            .where(BackupHistory.backup_config_id.in_(config_ids))
+            .group_by(BackupHistory.backup_config_id)
+        )
+        rows = (await db.execute(
+            _select(BackupHistory).where(BackupHistory.id.in_(latest_ids_subq))
+        )).scalars().all()
+        latest_by_config = {r.backup_config_id: r for r in rows}
+
     return templates.TemplateResponse(request, "backups/index.html", {
         "user": user,
         "server": server,
         "configs": configs,
         "storages": storages,
+        "latest_by_config": latest_by_config,
     })
 
 
