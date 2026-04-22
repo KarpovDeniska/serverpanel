@@ -168,6 +168,14 @@ def cli():
     rc.add_argument("--robot-user", required=True, help="e.g. '#ws+y9zKyNA7'")
     rc.add_argument("--robot-password", required=True)
 
+    sr = sub.add_parser(
+        "sync-from-robot",
+        help="Refresh Server.provider_server_id from Hetzner Robot API — fix the "
+             "'requires numeric server id, got <IP>' UI error that happens when a "
+             "server was seeded without Robot creds and its id was set to the IP.",
+    )
+    sr.add_argument("--server-name", default="hetzner-windows")
+
     args = parser.parse_args()
 
     if args.command == "import-hetzner-recovery":
@@ -378,6 +386,85 @@ def cli():
             print(f"Exported {len(written)} key(s) to {out_dir}:")
             for label, path in written:
                 print(f"  {label} -> {path}")
+
+        asyncio.run(_run())
+        sys.exit(0)
+
+    if args.command == "sync-from-robot":
+        from sqlalchemy import select
+        from serverpanel.infrastructure.crypto import decrypt_json
+        from serverpanel.infrastructure.database.engine import (
+            dispose_db as _dispose,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            get_session_factory,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            init_db as _init,
+        )
+        from serverpanel.infrastructure.database.models import (
+            ProviderConfig,
+            Server,
+        )
+        from serverpanel.infrastructure.providers.hetzner.robot_api import (
+            HetznerRobotAPI,
+        )
+
+        async def _run():
+            await _init()
+            async with get_session_factory()() as db:
+                srv = (await db.execute(
+                    select(Server).where(Server.name == args.server_name)
+                )).scalar_one_or_none()
+                if srv is None:
+                    sys.stderr.write(f"Server name={args.server_name!r} not found\n")
+                    sys.exit(2)
+                pc = await db.get(ProviderConfig, srv.provider_config_id)
+                if pc is None or not pc.credentials_encrypted:
+                    sys.stderr.write(
+                        "ProviderConfig has no Robot credentials — run "
+                        "`serverpanel set-robot-creds` first\n"
+                    )
+                    sys.exit(2)
+                creds = decrypt_json(pc.credentials_encrypted)
+                if not creds.get("robot_user") or not creds.get("robot_password"):
+                    sys.stderr.write("ProviderConfig.credentials_encrypted missing robot_user/robot_password\n")
+                    sys.exit(2)
+                api = HetznerRobotAPI(creds["robot_user"], creds["robot_password"])
+                servers = await api.get_servers()
+                match = None
+                for entry in servers:
+                    s = entry.get("server", {})
+                    if s.get("server_ip") == srv.ip_address:
+                        match = s
+                        break
+                if match is None:
+                    sys.stderr.write(
+                        f"No server with IP {srv.ip_address} in Robot account "
+                        f"(got {len(servers)} servers total)\n"
+                    )
+                    sys.exit(2)
+
+                old = srv.provider_server_id
+                srv.provider_server_id = str(match["server_number"])
+                # pick up server_name + product as useful metadata if empty
+                if not (srv.extra or {}).get("robot"):
+                    extra = dict(srv.extra or {})
+                    extra["robot"] = {
+                        "server_name": match.get("server_name"),
+                        "product": match.get("product"),
+                        "dc": match.get("dc"),
+                        "status": match.get("status"),
+                    }
+                    srv.extra = extra
+                db.add(srv)
+                await db.commit()
+                print(
+                    f"server {srv.name}: provider_server_id {old!r} -> "
+                    f"{srv.provider_server_id!r} (product={match.get('product')}, "
+                    f"dc={match.get('dc')})"
+                )
+            await _dispose()
 
         asyncio.run(_run())
         sys.exit(0)
