@@ -470,6 +470,34 @@ class BackupService:
             )
             await ssh.put_file(plan_path, json.dumps(resolved, ensure_ascii=False, indent=2))
 
+            if trigger["kind"] == "monthly":
+                # Monthly via schtasks.exe + a static .cmd wrapper: CIM
+                # MSFT_TaskMonthlyTrigger.DaysOfMonth (uint32[]) refuses to be
+                # assigned from PS 5.1's adapter, and XML register is fragile
+                # in an ssh exec_command context. schtasks has worked since
+                # Win2003; wrapping the PowerShell invocation in a .cmd lets
+                # /tr accept a path without nested-quote hell.
+                wrapper_path = base + r"\trigger.cmd"
+                wrapper_body = (
+                    "@echo off\r\n"
+                    f'powershell.exe -ExecutionPolicy Bypass -NoProfile -File "{REMOTE_SCRIPT}" '
+                    f'-PlanPath "{plan_path}" -ReportPath "{report_path}"\r\n'
+                )
+                await ssh.put_file(wrapper_path, wrapper_body)
+
+                register_cmd = (
+                    f'schtasks /create /tn "{task}" /tr "{wrapper_path}" '
+                    f'/sc MONTHLY /d {trigger["day"]} /st {trigger["at"]} '
+                    f'/ru SYSTEM /rl HIGHEST /f'
+                )
+                r = await ssh.execute(register_cmd, timeout=60)
+                if r.exit_code != 0:
+                    raise RuntimeError(
+                        f"schtasks /create MONTHLY failed (exit {r.exit_code}): "
+                        f"{(r.stderr or r.stdout)[-400:]}"
+                    )
+                return  # done, skip the Register-ScheduledTask path below
+
             ps_args = (
                 f'-ExecutionPolicy Bypass -NoProfile -File \\"{REMOTE_SCRIPT}\\" '
                 f'-PlanPath \\"{plan_path}\\" -ReportPath \\"{report_path}\\"'
@@ -481,20 +509,6 @@ class BackupService:
                 trigger_cmd = (
                     f"New-ScheduledTaskTrigger -Weekly -DaysOfWeek {trigger['day']} "
                     f"-At '{trigger['at']}'"
-                )
-            elif trigger["kind"] == "monthly":
-                # New-ScheduledTaskTrigger has no -Monthly switch; build via CIM.
-                # Windows clamps day>28 to the last day of short months.
-                # DaysOfMonth is uint32[] — a scalar trips E_INVALIDARG
-                # (HRESULT 0x80070057) at Register-ScheduledTask time.
-                trigger_cmd = (
-                    f"(New-CimInstance -CimClass (Get-CimClass "
-                    f"-ClassName MSFT_TaskMonthlyTrigger "
-                    f"-Namespace Root/Microsoft/Windows/TaskScheduler) "
-                    f"-ClientOnly -Property @{{ "
-                    f"DaysOfMonth = [uint32[]]@({trigger['day']}); "
-                    f"StartBoundary = (Get-Date '{trigger['at']}').ToString('s'); "
-                    f"Enabled = $true }})"
                 )
             else:
                 raise ValueError(f"unreachable: {trigger}")
