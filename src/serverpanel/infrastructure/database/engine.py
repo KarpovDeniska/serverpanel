@@ -80,6 +80,9 @@ async def cleanup_stale_runs() -> None:
     Process restart kills background asyncio tasks. Without this, rows stay
     'running' forever and block new starts (recovery has a guard against
     concurrent runs per server).
+
+    No cutoff: if the process has just started, every row still in 'running'
+    belongs to a task that did not survive the restart, regardless of age.
     """
     from sqlalchemy import update
 
@@ -89,18 +92,11 @@ async def cleanup_stale_runs() -> None:
         RecoveryHistory,
     )
 
-    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
-        minutes=get_settings().stale_run_timeout_minutes
-    )
-
     async with get_session_factory()() as db:
         for model in (InstallHistory, RecoveryHistory, BackupHistory):
-            started_col = model.started_at
             stmt = (
                 update(model)
                 .where(model.status == "running")
-                # started_at is NULL when row is pending/crashed early, or older than cutoff
-                .where((started_col < cutoff) | (started_col.is_(None)))
                 .values(
                     status="failed",
                     error_message="Interrupted by process restart",
