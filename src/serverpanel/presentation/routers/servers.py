@@ -186,10 +186,15 @@ async def server_detail(
 async def server_status(
     server_id: int,
     request: Request,
+    compact: int = 0,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """HTMX partial — returns server status fragment."""
+    """HTMX partial — returns server status fragment.
+
+    `compact=1` returns a tiny colored dot (used in the server list table);
+    otherwise returns the full status card used on the server detail page.
+    """
     server = await _get_server_or_404(server_id, user, db)
 
     status_data = {
@@ -244,7 +249,10 @@ async def server_status(
         status_data["api_status"] = "unavailable"
         status_data["api_hint"] = f"{type(e).__name__}: {e}"
 
-    return templates.TemplateResponse(request, "partials/server_status.html", {
+    template = (
+        "partials/server_status_dot.html" if compact else "partials/server_status.html"
+    )
+    return templates.TemplateResponse(request, template, {
         "server": server,
         "status": status_data,
     })

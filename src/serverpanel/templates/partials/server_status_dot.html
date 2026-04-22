@@ -1,0 +1,8 @@
+{# Compact status indicator for the server list table — just a colored dot. #}
+<span class="inline-block w-2 h-2 rounded-full
+             {% if status.online %}bg-green-500
+             {% else %}bg-red-500{% endif %}"
+      hx-get="/servers/{{ server.id }}/status?compact=1"
+      hx-trigger="every 30s"
+      hx-swap="outerHTML"
+      title="{% if status.online %}Online{% else %}Offline{% endif %}"></span>

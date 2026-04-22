@@ -34,7 +34,10 @@
                 <td class="px-4 py-3 text-sm">{{ server.provider_config.name if server.provider_config else '—' }}</td>
                 <td class="px-4 py-3 text-sm text-dark-muted">{{ server.os_type or '—' }}</td>
                 <td class="px-4 py-3">
-                    <span class="inline-block w-2 h-2 rounded-full bg-dark-muted"></span>
+                    <span class="inline-block w-2 h-2 rounded-full bg-dark-muted"
+                          hx-get="/servers/{{ server.id }}/status?compact=1"
+                          hx-trigger="load, every 30s"
+                          hx-swap="outerHTML"></span>
                 </td>
             </tr>
             {% endfor %}
