@@ -148,6 +148,16 @@ def cli():
                         help="StorageConfig name (or --storage-id). If there's only one for the server — picked automatically.")
     legacy.add_argument("--storage-id", type=int, help="Exact StorageConfig.id to use")
 
+    ek = sub.add_parser(
+        "export-keys",
+        help="Materialize SSH private keys from the DB to disk files "
+             "(server keys + Storage Box keys). The DB is Fernet-encrypted "
+             "with ENCRYPTION_KEY; losing .env alone would lock you out of "
+             "restore even if serverpanel.db survives. Keep a copy outside.",
+    )
+    ek.add_argument("--out", default="~/.ssh/serverpanel-seed",
+                    help="Target directory (created if missing). Default: ~/.ssh/serverpanel-seed")
+
     args = parser.parse_args()
 
     if args.command == "import-hetzner-recovery":
@@ -287,6 +297,77 @@ def cli():
                 print(f"backup_weekly_id={weekly_id} (name=legacy-weekly-iis)")
                 print(f"backup_monthly_id={monthly_id} (name=legacy-monthly)")
             await _dispose()
+
+        asyncio.run(_run())
+        sys.exit(0)
+
+    if args.command == "export-keys":
+        import os
+        import stat
+        from sqlalchemy import select
+        from serverpanel.infrastructure.crypto import decrypt_json
+        from serverpanel.infrastructure.database.engine import (
+            dispose_db as _dispose,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            get_session_factory,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            init_db as _init,
+        )
+        from serverpanel.infrastructure.database.models import Server, StorageConfig
+
+        out_dir = Path(os.path.expanduser(args.out)).resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        async def _run():
+            await _init()
+            written: list[tuple[str, str]] = []  # (label, path)
+            async with get_session_factory()() as db:
+                for srv in (await db.execute(select(Server))).scalars().all():
+                    if not srv.ssh_key_encrypted:
+                        continue
+                    try:
+                        creds = decrypt_json(srv.ssh_key_encrypted)
+                    except Exception as e:
+                        sys.stderr.write(f"WARN: cannot decrypt server {srv.name!r}: {e}\n")
+                        continue
+                    pk = creds.get("private_key")
+                    if not pk:
+                        continue
+                    p = out_dir / f"{srv.name}_id_ed25519"
+                    p.write_text(pk, encoding="utf-8")
+                    try:
+                        p.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600 — ssh refuses world-readable
+                    except Exception:
+                        pass
+                    written.append((f"server {srv.name}", str(p)))
+
+                for stor in (await db.execute(select(StorageConfig))).scalars().all():
+                    if not stor.connection_encrypted:
+                        continue
+                    try:
+                        conn = decrypt_json(stor.connection_encrypted)
+                    except Exception as e:
+                        sys.stderr.write(f"WARN: cannot decrypt storage {stor.name!r}: {e}\n")
+                        continue
+                    pk = conn.get("private_key")
+                    if not pk:
+                        continue
+                    p = out_dir / f"{stor.name}_id_ed25519"
+                    p.write_text(pk, encoding="utf-8")
+                    try:
+                        p.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                    except Exception:
+                        pass
+                    written.append((f"storage {stor.name}", str(p)))
+            await _dispose()
+            if not written:
+                print(f"No keys found in DB (checked {out_dir})")
+                return
+            print(f"Exported {len(written)} key(s) to {out_dir}:")
+            for label, path in written:
+                print(f"  {label} -> {path}")
 
         asyncio.run(_run())
         sys.exit(0)
