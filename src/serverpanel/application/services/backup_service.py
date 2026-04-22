@@ -65,19 +65,18 @@ def _parse_schedule(expr: str | None) -> dict | None:
     """Parse BackupConfig.schedule to Task Scheduler trigger params.
 
     Formats:
-      - "HH:MM"                 — daily at time
-      - "weekly:DAY@HH:MM"      — DAY in Mon/Tue/Wed/Thu/Fri/Sat/Sun (case-insensitive)
-      - empty/None              — no schedule (manual only)
+      - "HH:MM"                  — daily at time
+      - "weekly:DAY@HH:MM"       — DAY in Mon/Tue/Wed/Thu/Fri/Sat/Sun (case-insensitive)
+      - "monthly:D@HH:MM"        — D in 1..31 (day of month; Windows clamps to month end)
+      - empty/None               — no schedule (manual only)
     """
     if not expr:
         return None
     expr = expr.strip()
     if not expr:
         return None
-    if ":" in expr and "@" not in expr and not expr.lower().startswith("weekly"):
-        hh, mm = expr.split(":", 1)
-        return {"kind": "daily", "at": f"{int(hh):02d}:{int(mm):02d}"}
-    if expr.lower().startswith("weekly:"):
+    low = expr.lower()
+    if low.startswith("weekly:"):
         body = expr.split(":", 1)[1]
         day, time_part = body.split("@", 1)
         hh, mm = time_part.split(":", 1)
@@ -86,6 +85,21 @@ def _parse_schedule(expr: str | None) -> dict | None:
             "day": day.strip().capitalize()[:3],
             "at": f"{int(hh):02d}:{int(mm):02d}",
         }
+    if low.startswith("monthly:"):
+        body = expr.split(":", 1)[1]
+        day, time_part = body.split("@", 1)
+        d = int(day.strip())
+        if not 1 <= d <= 31:
+            raise ValueError(f"monthly day must be 1..31, got {d}")
+        hh, mm = time_part.split(":", 1)
+        return {
+            "kind": "monthly",
+            "day": d,
+            "at": f"{int(hh):02d}:{int(mm):02d}",
+        }
+    if ":" in expr and "@" not in expr:
+        hh, mm = expr.split(":", 1)
+        return {"kind": "daily", "at": f"{int(hh):02d}:{int(mm):02d}"}
     raise ValueError(f"Unsupported schedule format: {expr!r}")
 
 _SCRIPT_PATH = (
@@ -455,6 +469,17 @@ class BackupService:
                 trigger_cmd = (
                     f"New-ScheduledTaskTrigger -Weekly -DaysOfWeek {trigger['day']} "
                     f"-At '{trigger['at']}'"
+                )
+            elif trigger["kind"] == "monthly":
+                # New-ScheduledTaskTrigger has no -Monthly switch; build via CIM.
+                # Windows clamps day>28 to the last day of short months.
+                trigger_cmd = (
+                    f"(New-CimInstance -CimClass (Get-CimClass "
+                    f"-ClassName MSFT_TaskMonthlyTrigger "
+                    f"-Namespace Root/Microsoft/Windows/TaskScheduler) "
+                    f"-ClientOnly -Property @{{ "
+                    f"DaysOfMonth = [uint32]{trigger['day']}; "
+                    f"StartBoundary = (Get-Date '{trigger['at']}').ToString('s') }})"
                 )
             else:
                 raise ValueError(f"unreachable: {trigger}")

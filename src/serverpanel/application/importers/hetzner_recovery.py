@@ -104,6 +104,7 @@ async def import_legacy_config(
 
     daily_id = await _upsert_daily_backup(db, srv.id, stor.id)
     weekly_id = await _upsert_weekly_backup(db, srv.id, stor.id)
+    monthly_id = await _upsert_monthly_backup(db, srv.id, stor.id)
 
     # store windows recovery defaults as hints on Server.extra
     extra = dict(srv.extra or {})
@@ -127,6 +128,7 @@ async def import_legacy_config(
         "storage_config_id": stor.id,
         "backup_daily_id": daily_id,
         "backup_weekly_id": weekly_id,
+        "backup_monthly_id": monthly_id,
     }
 
 
@@ -279,6 +281,45 @@ async def _upsert_daily_backup(
         row.sources = LEGACY_DAILY_SOURCES
         row.destinations = destinations
         row.schedule = row.schedule or "03:00"
+        db.add(row)
+    return row.id
+
+
+async def _upsert_monthly_backup(
+    db: AsyncSession, server_id: int, storage_id: int
+) -> int:
+    """Long-retention monthly full snapshot (same source set as daily)."""
+    name = "legacy-monthly"
+    r = await db.execute(
+        select(BackupConfig).where(
+            BackupConfig.server_id == server_id,
+            BackupConfig.name == name,
+        )
+    )
+    row = r.scalar_one_or_none()
+    destinations = [{
+        "kind": "storage",
+        "storage_config_id": storage_id,
+        "base_path": "backups/monthly",
+        "aliases": [],
+        "date_folder": True,
+        "frequency": "daily",  # "weekly" filter would skip non-Sunday; monthly task fires once a month anyway
+    }]
+    if row is None:
+        row = BackupConfig(
+            server_id=server_id,
+            name=name,
+            sources=LEGACY_DAILY_SOURCES,
+            destinations=destinations,
+            schedule="monthly:1@05:00",
+            rotation_days=365,
+        )
+        db.add(row)
+        await db.flush()
+    else:
+        row.sources = LEGACY_DAILY_SOURCES
+        row.destinations = destinations
+        row.schedule = row.schedule or "monthly:1@05:00"
         db.add(row)
     return row.id
 

@@ -229,6 +229,7 @@ def cli():
         from sqlalchemy import select
         from serverpanel.application.importers.hetzner_recovery import (
             _upsert_daily_backup,
+            _upsert_monthly_backup,
             _upsert_weekly_backup,
         )
         from serverpanel.infrastructure.database.engine import (
@@ -279,10 +280,12 @@ def cli():
 
                 daily_id = await _upsert_daily_backup(db, srv.id, stor.id)
                 weekly_id = await _upsert_weekly_backup(db, srv.id, stor.id)
+                monthly_id = await _upsert_monthly_backup(db, srv.id, stor.id)
                 await db.commit()
                 print(f"server_id={srv.id} storage_id={stor.id}")
                 print(f"backup_daily_id={daily_id} (name=legacy-daily)")
                 print(f"backup_weekly_id={weekly_id} (name=legacy-weekly-iis)")
+                print(f"backup_monthly_id={monthly_id} (name=legacy-monthly)")
             await _dispose()
 
         asyncio.run(_run())

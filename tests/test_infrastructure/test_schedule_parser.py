@@ -32,6 +32,26 @@ def test_weekly_case_insensitive():
     assert _parse_schedule("weekly:mon@02:30")["day"] == "Mon"
 
 
+def test_monthly():
+    assert _parse_schedule("monthly:1@05:00") == {
+        "kind": "monthly",
+        "day": 1,
+        "at": "05:00",
+    }
+    assert _parse_schedule("monthly:28@23:15") == {
+        "kind": "monthly",
+        "day": 28,
+        "at": "23:15",
+    }
+
+
+def test_monthly_day_out_of_range_raises():
+    with pytest.raises(ValueError):
+        _parse_schedule("monthly:0@05:00")
+    with pytest.raises(ValueError):
+        _parse_schedule("monthly:32@05:00")
+
+
 def test_invalid_format_raises():
     with pytest.raises(ValueError):
         _parse_schedule("cron: 0 3 * * *")
