@@ -26,6 +26,43 @@
                     {% else %}bg-dark-muted{% endif %}"></span>
                 <span id="status-text" class="font-medium">{{ history.status }}</span>
             </div>
+
+            {# Progress bar + step list #}
+            {% set phases = ['Сборка плана', 'SSH подключение', 'Загрузка скрипта и плана', 'Выполнение бэкапа', 'Чтение отчёта', 'Готово'] %}
+            <div>
+                <div class="flex justify-between text-xs text-dark-muted mb-1">
+                    <span id="current-step">{{ history.current_step or '—' }}</span>
+                    <span id="progress-pct">{{ history.progress }}%</span>
+                </div>
+                <div class="w-full bg-dark-bg rounded h-1.5 overflow-hidden">
+                    <div id="progress-bar"
+                         class="h-full bg-dark-accent transition-all"
+                         style="width: {{ history.progress }}%"></div>
+                </div>
+            </div>
+
+            <ul id="phase-list" class="text-xs space-y-1 pt-2">
+                {% for phase in phases %}
+                {% set idx = loop.index %}
+                {% set done = history.progress >= (idx * 100 // phases|length) %}
+                {% set current = history.current_step == phase %}
+                <li class="flex items-center gap-2" data-phase-idx="{{ idx }}">
+                    <span class="phase-icon inline-block w-3 text-center
+                        {% if done %}text-green-400
+                        {% elif current %}text-yellow-400
+                        {% else %}text-dark-muted{% endif %}">
+                        {% if done %}✓{% elif current %}●{% else %}○{% endif %}
+                    </span>
+                    <span class="phase-label
+                        {% if current %}text-dark-text font-medium
+                        {% elif done %}text-dark-muted line-through
+                        {% else %}text-dark-muted{% endif %}">
+                        {{ phase }}
+                    </span>
+                </li>
+                {% endfor %}
+            </ul>
+
             {% if history.error_message %}
             <div class="bg-red-900/30 border border-red-700 text-red-400 px-3 py-2 rounded text-xs">
                 {{ history.error_message }}
@@ -95,10 +132,35 @@
         log.scrollTop = log.scrollHeight;
     }
 
+    function updatePhases(currentStep, progressPct) {
+        document.querySelectorAll('#phase-list li').forEach((li) => {
+            const idx = parseInt(li.dataset.phaseIdx, 10);
+            const label = li.querySelector('.phase-label');
+            const icon = li.querySelector('.phase-icon');
+            const total = document.querySelectorAll('#phase-list li').length;
+            const phaseDoneAt = Math.floor((idx * 100) / total);
+            const isCurrent = label.textContent.trim() === currentStep;
+            const isDone = progressPct >= phaseDoneAt;
+            icon.textContent = isDone ? '✓' : (isCurrent ? '●' : '○');
+            icon.className = 'phase-icon inline-block w-3 text-center ' +
+                (isDone ? 'text-green-400' : isCurrent ? 'text-yellow-400' : 'text-dark-muted');
+            label.className = 'phase-label ' +
+                (isCurrent ? 'text-dark-text font-medium'
+                 : isDone ? 'text-dark-muted line-through'
+                 : 'text-dark-muted');
+        });
+    }
+
     ws.onmessage = function(e) {
         const data = JSON.parse(e.data);
         if (data.type === 'log') {
             addLog(data.message, data.level);
+        } else if (data.type === 'progress') {
+            const pct = Math.round((data.progress / data.total) * 100);
+            document.getElementById('current-step').textContent = data.step;
+            document.getElementById('progress-pct').textContent = pct + '%';
+            document.getElementById('progress-bar').style.width = pct + '%';
+            updatePhases(data.step, pct);
         } else if (data.type === 'status') {
             document.getElementById('status-text').textContent = data.status;
             const dot = document.getElementById('status-dot');

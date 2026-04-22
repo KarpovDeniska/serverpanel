@@ -96,6 +96,17 @@ _SCRIPT_PATH = (
 )
 
 
+BACKUP_PHASES = (
+    "Сборка плана",
+    "SSH подключение",
+    "Загрузка скрипта и плана",
+    "Выполнение бэкапа",
+    "Чтение отчёта",
+    "Готово",
+)
+PHASES_TOTAL = len(BACKUP_PHASES)
+
+
 class BackupService:
     def __init__(self, db: AsyncSession, reporter: ProgressReporter | None = None):
         self.db = db
@@ -105,6 +116,13 @@ class BackupService:
     # Public entry
     # ------------------------------------------------------------------
 
+    async def _phase(self, history: BackupHistory, num: int) -> None:
+        name = BACKUP_PHASES[num - 1]
+        history.current_step = name
+        history.progress = int(num / PHASES_TOTAL * 100)
+        await self._flush(history)
+        await self.reporter.progress(name, num, PHASES_TOTAL)
+
     async def run(self, config: BackupConfig, history: BackupHistory) -> None:
         history.started_at = datetime.datetime.now(datetime.UTC)
         history.status = BackupStatus.RUNNING
@@ -113,17 +131,21 @@ class BackupService:
         await self.reporter.status(BackupStatus.RUNNING.value)
 
         try:
+            await self._phase(history, 1)
             plan = BackupPlan.model_validate(
                 {"sources": config.sources, "destinations": config.destinations}
             )
             resolved = await self._build_remote_plan(config, plan)
             await self._append_log(history, f"Plan built: {len(plan.sources)} sources × {len(plan.destinations)} destinations")
 
+            await self._phase(history, 2)
             async with self._open_ssh(config.server) as ssh:
                 await self._persist_learned_host_key()
+                await self._phase(history, 3)
                 await self._deploy_script(ssh)
                 await ssh.put_file(REMOTE_PLAN, json.dumps(resolved, ensure_ascii=False, indent=2))
                 await self._append_log(history, "Script and plan uploaded")
+                await self._phase(history, 4)
 
                 cmd = (
                     f'powershell -ExecutionPolicy Bypass -NoProfile '
@@ -183,6 +205,7 @@ class BackupService:
                         pending_lines.append(tail)
                 await _drain()
 
+                await self._phase(history, 5)
                 try:
                     report_bytes = await ssh.fetch_file(REMOTE_REPORT)
                     report = json.loads(report_bytes.decode("utf-8"))
@@ -193,6 +216,7 @@ class BackupService:
                     ) from e
 
             self._apply_report(history, report, script_exit=result.exit_code)
+            await self._phase(history, 6)
             status_str = history.status.value if hasattr(history.status, "value") else str(history.status)
             await self.reporter.status(status_str)
 

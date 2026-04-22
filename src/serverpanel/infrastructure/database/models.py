@@ -199,6 +199,8 @@ class BackupHistory(Base):
     started_at: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     status: Mapped[str] = mapped_column(String(50), default="pending")
+    current_step: Mapped[str | None] = mapped_column(String(255))
+    progress: Mapped[int] = mapped_column(Integer, default=0)
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     details: Mapped[dict | None] = mapped_column(JSON)
     error_message: Mapped[str | None] = mapped_column(Text)
