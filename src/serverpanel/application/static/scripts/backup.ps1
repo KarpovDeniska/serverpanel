@@ -236,9 +236,11 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "UserKnownHostsFile=$env:ProgramData\serverpanel\known_hosts"
     )
-    $sftpOpts = @(
+    # sftp base options (without -b — we pass a real batch file per call).
+    # Passing `-b -` + piping stdin from PowerShell hangs in SSH sessions on
+    # Windows Server: stdin does not close cleanly → sftp waits forever.
+    $sftpOptsBase = @(
         "-P", "$sbPort",
-        "-b", "-",
         "-o", "BatchMode=yes",
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "UserKnownHostsFile=$env:ProgramData\serverpanel\known_hosts"
@@ -257,7 +259,20 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         }
         if ($keyFile) {
             $sshOpts += @("-i", $keyFile)
-            $sftpOpts += @("-i", $keyFile)
+            $sftpOptsBase += @("-i", $keyFile)
+        }
+
+        # Helper: run sftp with a one-shot batch file and always delete it.
+        $RunSftpBatch = {
+            param($batchText)
+            $batchFile = Join-Path $env:TEMP ("sp_sftp_" + [Guid]::NewGuid().ToString("N") + ".batch")
+            Write-Utf8 $batchFile $batchText
+            try {
+                $out = & sftp @sftpOptsBase -b $batchFile "${sbUser}@${sbHost}" 2>&1
+                return ,$out
+            } finally {
+                Remove-Item -LiteralPath $batchFile -Force -ErrorAction SilentlyContinue
+            }
         }
 
         $remoteBase = ($dest.base_path -replace '\\', '/').TrimEnd('/')
@@ -271,7 +286,7 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
             $cur = if ($cur) { "$cur/$p" } else { $p }
             $mkdirBatch += "-mkdir $cur`n"
         }
-        $mkdirBatch | & sftp @sftpOpts "${sbUser}@${sbHost}" 2>&1 | Out-Null
+        & $RunSftpBatch $mkdirBatch | Out-Null
 
         $aliases = if ($dest.aliases.Count -eq 0) { @($sourcesByAlias.Keys) } else { @($dest.aliases) }
         foreach ($alias in $aliases) {
@@ -307,13 +322,13 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         if ($dest.date_folder -and $dest.rotation_days -gt 0) {
             $cutoff = (Get-Date).AddDays(-$dest.rotation_days).ToString("yyyy-MM-dd")
             try {
-                $listing = "ls -1 $remoteBase/" | & sftp @sftpOpts "${sbUser}@${sbHost}" 2>&1
+                $listing = & $RunSftpBatch "ls -1 $remoteBase/`n"
                 $oldDirs = $listing |
                     ForEach-Object { $_.Trim() } |
                     Where-Object { $_ -match '^\d{4}-\d{2}-\d{2}$' -and $_ -lt $cutoff }
                 foreach ($d in $oldDirs) {
                     $rmCmd = "rm $remoteBase/$d/*`nrmdir $remoteBase/$d`n"
-                    $rmCmd | & sftp @sftpOpts "${sbUser}@${sbHost}" 2>&1 | Out-Null
+                    & $RunSftpBatch $rmCmd | Out-Null
                     Log "storage[$($dest.index)] rotated $remoteBase/$d"
                 }
             } catch { Log "storage rotation warn: $_" }
