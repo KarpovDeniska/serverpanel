@@ -158,6 +158,16 @@ def cli():
     ek.add_argument("--out", default="~/.ssh/serverpanel-seed",
                     help="Target directory (created if missing). Default: ~/.ssh/serverpanel-seed")
 
+    rc = sub.add_parser(
+        "set-robot-creds",
+        help="Attach Hetzner Robot webservice credentials (login starts with '#ws+') "
+             "to the ProviderConfig of a given server. Unlocks the Recovery flow "
+             "and API status panel in the UI.",
+    )
+    rc.add_argument("--server-name", default="hetzner-windows")
+    rc.add_argument("--robot-user", required=True, help="e.g. '#ws+y9zKyNA7'")
+    rc.add_argument("--robot-password", required=True)
+
     args = parser.parse_args()
 
     if args.command == "import-hetzner-recovery":
@@ -368,6 +378,53 @@ def cli():
             print(f"Exported {len(written)} key(s) to {out_dir}:")
             for label, path in written:
                 print(f"  {label} -> {path}")
+
+        asyncio.run(_run())
+        sys.exit(0)
+
+    if args.command == "set-robot-creds":
+        from sqlalchemy import select
+        from serverpanel.infrastructure.crypto import encrypt_json
+        from serverpanel.infrastructure.database.engine import (
+            dispose_db as _dispose,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            get_session_factory,
+        )
+        from serverpanel.infrastructure.database.engine import (
+            init_db as _init,
+        )
+        from serverpanel.infrastructure.database.models import (
+            ProviderConfig,
+            Server,
+        )
+
+        async def _run():
+            await _init()
+            async with get_session_factory()() as db:
+                srv = (await db.execute(
+                    select(Server).where(Server.name == args.server_name)
+                )).scalar_one_or_none()
+                if srv is None:
+                    sys.stderr.write(f"Server name={args.server_name!r} not found\n")
+                    sys.exit(2)
+                pc = await db.get(ProviderConfig, srv.provider_config_id)
+                if pc is None:
+                    sys.stderr.write(
+                        f"ProviderConfig {srv.provider_config_id} not found for server {srv.id}\n"
+                    )
+                    sys.exit(2)
+                pc.credentials_encrypted = encrypt_json({
+                    "robot_user": args.robot_user,
+                    "robot_password": args.robot_password,
+                })
+                db.add(pc)
+                await db.commit()
+                print(
+                    f"Robot credentials set on provider {pc.id} ({pc.name}), "
+                    f"server {srv.name} (id={srv.id})"
+                )
+            await _dispose()
 
         asyncio.run(_run())
         sys.exit(0)
