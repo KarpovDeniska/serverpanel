@@ -7,7 +7,9 @@
 ## 2026-04-22 — disaster recovery для мака
 
 - `scripts/bootstrap-mac.sh` — one-command setup: Xcode CLT, Homebrew, python@3.12, clone, venv, pip install, опциональная распаковка tar-архива через `SERVERPANEL_BACKUP_TAR=`, LaunchAgent, health-check. Идемпотентный. Генерит свежий `.env` если архив не задан.
-- `docs/OPERATIONS.md` — добавлен §1.0-auto (скрипт), §1.0 (системные зависимости на голом маке: `xcode-select --install`, `/bin/bash -c "$(curl ... install.sh)"`, `brew install python@3.12`), §4 обновлён ссылкой на скрипт.
+- `scripts/restore.command` — GUI-обёртка для двойного клика: osascript-диалог выбора архива → git clone (если нет) → bootstrap. Лежит в репе + копия в iCloud рядом с архивами.
+- **Репо переключён в public** (`gh repo edit ... --visibility public`). В коде/доках только публичные identifier-ы (IP, SB-логин, Robot server_number), ни паролей ни ключей в истории нет (`.env`, `data/`, `*.db` в .gitignore с начала). На новом маке `git clone` и `raw.githubusercontent.com` работают без авторизации.
+- `docs/OPERATIONS.md` — §1.0-auto расписывает вариант A (restore.command) + вариант B (curl-one-liner). §1.0 — системные зависимости голого мака (`xcode-select --install`, brew, python@3.12). §4 обновлён.
 - Проверено сквозное восстановление на текущем маке: `tar czf` свежего архива → полный снос (unload LaunchAgent, `rm -rf ~/projects/serverpanel ~/.ssh/serverpanel-seed`, чистка логов) → `git clone` + `bash bootstrap-mac.sh` с `SERVERPANEL_BACKUP_TAR=…` → панель на `127.0.0.1:5000`, один uvicorn-процесс под launchd, все конфиги/история/ключи на месте.
 - Документация: ARCHITECTURE.md вынесен из CLAUDE.md (CLAUDE.md ужат до интро + ссылок + статуса).
 

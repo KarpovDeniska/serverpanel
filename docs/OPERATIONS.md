@@ -8,22 +8,31 @@
 
 Предполагается что на целевом Windows-сервере уже что-то работает (либо это рабочий сервер с 1С, либо ты его только что развернул вручную).
 
-### 1.0-auto. Всё одним скриптом (рекомендуемый путь)
+### 1.0-auto. Всё одним действием (рекомендуемый путь)
 
-В репе лежит [scripts/bootstrap-mac.sh](../scripts/bootstrap-mac.sh) — ставит CLT + brew + python@3.12, клонирует репо, создаёт venv, опционально распаковывает твой tar-архив, генерирует `.env` (если его нет), прописывает LaunchAgent, проверяет `/health`.
+Репо публичный → любой из вариантов ниже работает на голом маке без GitHub-авторизации.
+
+**Вариант A — двойной клик (проще всего).** Файл [`scripts/restore.command`](../scripts/restore.command) лежит в репе + копия в iCloud (`Desktop/gefest/Сервер/restore.command`). На новом маке:
+
+1. Скачать из iCloud актуальный `serverpanel-backup-*.tar.gz` и `restore.command` (или открыть прямо из iCloud-папки).
+2. ПКМ на `restore.command` → **Открыть** → **Открыть** (первый запуск, обойти Gatekeeper «неизвестный разработчик»).
+3. В диалоге выбрать `.tar.gz` архив → дальше всё автоматом (CLT + brew + python@3.12 + clone + venv + распаковка + LaunchAgent + health-check).
+4. Открыть `http://127.0.0.1:5000`.
+
+**Вариант B — curl в терминал (если предпочитаешь CLI).** Сам скрипт — [`scripts/bootstrap-mac.sh`](../scripts/bootstrap-mac.sh).
 
 С восстановлением из архива:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KarpovDeniska/serverpanel/main/scripts/bootstrap-mac.sh -o /tmp/bootstrap-mac.sh
-SERVERPANEL_BACKUP_TAR=~/Downloads/serverpanel-backup-20260422.tar.gz bash /tmp/bootstrap-mac.sh
+SERVERPANEL_BACKUP_TAR=~/Downloads/serverpanel-backup-YYYYMMDD-HHMM.tar.gz \
+  bash <(curl -fsSL https://raw.githubusercontent.com/KarpovDeniska/serverpanel/main/scripts/bootstrap-mac.sh)
 ```
 
-С нуля (без архива — ключи и конфиги придётся завести руками после):
+С нуля (без архива — потом `serverpanel seed …` + `seed-legacy-backups` руками):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KarpovDeniska/serverpanel/main/scripts/bootstrap-mac.sh | bash
 ```
 
-Если предпочитаешь делать шагами — читай §1.0…§1.8 ниже. Скрипт делает ровно те же действия.
+Оба варианта делают ровно одни и те же действия. Если хочешь пройти руками по шагам — читай §1.0…§1.8 ниже.
 
 ### 1.0. Системные зависимости (голый мак)
 
