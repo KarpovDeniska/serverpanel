@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Провайдер — {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center gap-2 text-sm text-dark-muted mb-2">
+        <a href="/servers" class="hover:text-dark-accent">Серверы</a>
+        <span>/</span>
+        <a href="/servers/{{ server.id }}" class="hover:text-dark-accent">{{ server.name }}</a>
+        <span>/</span>
+        <span class="text-dark-text">Провайдер</span>
+    </div>
+    <h2 class="text-2xl font-bold">Настройки провайдера</h2>
+    <p class="text-sm text-dark-muted mt-1">
+        Webservice-логин начинается с <code>#ws+</code>. Обычный Robot-логин не подойдёт.
+    </p>
+</div>
+
+{% if error %}
+<div class="mb-4 px-4 py-2 rounded border text-sm bg-red-900/30 border-red-700 text-red-400 whitespace-pre-wrap">
+    ❌ {{ error }}
+</div>
+{% endif %}
+
+<form method="post" action="/servers/{{ server.id }}/provider/edit" class="max-w-xl space-y-4">
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Тип провайдера</label>
+        <input type="text" value="{{ provider.provider_type }}" disabled
+               class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm text-dark-muted">
+    </div>
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Имя (для UI)</label>
+        <input type="text" name="provider_name" value="{{ provider.name }}" required
+               class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm">
+    </div>
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Webservice login</label>
+        <input type="text" name="credential_user" value="{{ current_user_hint }}" required
+               placeholder="#ws+…"
+               class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm font-mono">
+    </div>
+    <div>
+        <label class="block text-xs text-dark-muted uppercase mb-1">Webservice password</label>
+        <input type="password" name="credential_password" required
+               placeholder="вводится заново при каждой правке"
+               class="w-full bg-dark-bg border border-dark-border rounded px-3 py-2 text-sm font-mono">
+        <p class="text-xs text-dark-muted mt-1">
+            Панель не хранит пароль в расшифрованном виде — введите текущий или новый.
+        </p>
+    </div>
+    <div class="flex gap-2 pt-2">
+        <button type="submit"
+                class="px-4 py-2 bg-dark-accent/20 border border-dark-accent/50 text-dark-accent rounded hover:bg-dark-accent/30 text-sm">
+            Сохранить
+        </button>
+        <a href="/servers/{{ server.id }}"
+           class="px-4 py-2 bg-dark-bg border border-dark-border text-dark-muted rounded hover:text-dark-text text-sm">
+            Отмена
+        </a>
+    </div>
+</form>
+
+<div class="mt-8 pt-6 border-t border-dark-border max-w-xl">
+    <h3 class="text-sm font-semibold text-dark-muted uppercase mb-2">Re-discover</h3>
+    <p class="text-xs text-dark-muted mb-3">
+        Перечитать список серверов из Robot API. Существующим серверам подправит реальный
+        <code>server_number</code>, новые — добавит в панель. Дубликатов не будет
+        (совпадение по IP).
+    </p>
+    <form method="post" action="/servers/{{ server.id }}/provider/rediscover">
+        <button type="submit"
+                class="px-3 py-2 bg-dark-bg border border-dark-border text-dark-text rounded hover:border-dark-accent hover:text-dark-accent text-sm">
+            ⟲ Re-discover servers
+        </button>
+    </form>
+</div>
+{% endblock %}

@@ -143,6 +143,148 @@ async def add_server(
     return RedirectResponse(url="/servers", status_code=302)
 
 
+@router.get("/{server_id}/provider/edit", response_class=HTMLResponse)
+async def provider_edit_page(
+    server_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Form to change the Robot webservice credentials on a server's
+    existing ProviderConfig, or to re-discover servers under that provider."""
+    server = await _get_server_or_404(server_id, user, db)
+    pc = server.provider_config
+    # Never prefill the password — we don't have it plain anyway after encrypt.
+    creds_hint = ""
+    try:
+        decrypted = decrypt_json(pc.credentials_encrypted)
+        creds_hint = decrypted.get("robot_user", "")
+    except Exception:
+        pass
+    return templates.TemplateResponse(request, "servers/provider_edit.html", {
+        "user": user,
+        "server": server,
+        "provider": pc,
+        "current_user_hint": creds_hint,
+        "error": None,
+    })
+
+
+@router.post("/{server_id}/provider/edit")
+async def provider_edit_submit(
+    server_id: int,
+    request: Request,
+    provider_name: str = Form(...),
+    credential_user: str = Form(...),
+    credential_password: str = Form(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    server = await _get_server_or_404(server_id, user, db)
+    pc = server.provider_config
+
+    # Validate creds against Robot API before saving, so we never silently
+    # replace working credentials with broken ones.
+    credentials = {"robot_user": credential_user, "robot_password": credential_password}
+    try:
+        test_provider = create_provider(pc.provider_type, credentials)
+        await test_provider.list_servers()
+        await test_provider.close()
+    except ProviderError as e:
+        err = "Неверные credentials (401). Webservice-логин должен начинаться с #ws+." \
+            if "401" in str(e) or "Unauthorized" in str(e).lower() else f"Ошибка провайдера: {e}"
+        return templates.TemplateResponse(request, "servers/provider_edit.html", {
+            "user": user, "server": server, "provider": pc,
+            "current_user_hint": credential_user, "error": err,
+        }, status_code=400)
+    except Exception as e:
+        return templates.TemplateResponse(request, "servers/provider_edit.html", {
+            "user": user, "server": server, "provider": pc,
+            "current_user_hint": credential_user, "error": f"Ошибка подключения: {e}",
+        }, status_code=400)
+
+    pc.name = provider_name
+    pc.credentials_encrypted = encrypt_json(credentials)
+    db.add(pc)
+    await db.commit()
+    return RedirectResponse(
+        url=f"/servers/{server_id}?toast=ok:Provider creds updated", status_code=302
+    )
+
+
+@router.post("/{server_id}/provider/rediscover")
+async def provider_rediscover(
+    server_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-read the server list from the provider API under this server's
+    existing ProviderConfig. For every server in the account:
+      - if already in DB under this provider: update provider_server_id
+        from whatever is there (IP) to the real numeric id, refresh name/ip;
+      - otherwise: insert as new Server row.
+    Existing BackupConfigs / history / storages stay attached by server_id.
+    """
+    server = await _get_server_or_404(server_id, user, db)
+    pc = server.provider_config
+    try:
+        provider = create_provider(pc.provider_type, decrypt_json(pc.credentials_encrypted))
+        discovered = await provider.list_servers()
+        await provider.close()
+    except Exception as e:
+        msg = str(e).replace("\n", " ").replace("\r", " ")[:500]
+        return RedirectResponse(
+            url=f"/servers/{server_id}?toast=err:{msg}", status_code=302
+        )
+
+    server_repo = ServerRepository(db)
+    existing = await server_repo.list_for_provider(pc.id) if hasattr(server_repo, "list_for_provider") else None
+    if existing is None:
+        # Fallback: query directly.
+        from sqlalchemy import select as _select
+        existing = (await db.execute(
+            _select(Server).where(Server.provider_config_id == pc.id)
+        )).scalars().all()
+
+    by_ip = {s.ip_address: s for s in existing if s.ip_address}
+
+    added = 0
+    updated = 0
+    for info in discovered:
+        real_id = str(info.server_id)
+        row = by_ip.get(info.ip_address)
+        if row is not None:
+            changed = False
+            if row.provider_server_id != real_id:
+                row.provider_server_id = real_id
+                changed = True
+            if info.name and row.name != info.name:
+                row.name = info.name
+                changed = True
+            if info.os and row.os_type != info.os:
+                row.os_type = info.os
+                changed = True
+            if changed:
+                db.add(row)
+                updated += 1
+        else:
+            new_row = Server(
+                provider_config_id=pc.id,
+                provider_server_id=real_id,
+                name=info.name or f"Server {real_id}",
+                ip_address=info.ip_address,
+                os_type=info.os,
+                extra=info.metadata or {},
+            )
+            db.add(new_row)
+            added += 1
+    await db.commit()
+    return RedirectResponse(
+        url=f"/servers/{server_id}?toast=ok:Re-discover: added {added}, updated {updated}",
+        status_code=302,
+    )
+
+
 @router.get("/{server_id}", response_class=HTMLResponse)
 async def server_detail(
     server_id: int,
