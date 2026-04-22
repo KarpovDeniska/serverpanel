@@ -94,12 +94,22 @@ uvicorn serverpanel.main:app --host 0.0.0.0 --port 5000 --reload
 - Каждое утро в ~03:15 — ✅ в Telegram от `legacy-daily`.
 - Каждое воскресенье в ~04:30 — ✅ от `legacy-weekly-iis`.
 - Каждое 1-е число месяца в ~05:15 — ✅ от `legacy-monthly`.
+- Через ~15 мин после прогона — запись появится в UI (Dashboard, страница сервера, список бэкапов). Фоновый поллер сам подтягивает отчёты с сервера.
 
 **Если ✅ не пришло — проверять сразу**, не откладывать. Тишина = сигнал, что что-то не пинговалось. Сценарии:
 - Задача в Task Scheduler отключена / удалена → в RDP: `taskschd.msc` → Task Scheduler Library → найти `serverpanel-backup-*`.
 - `backup.ps1` падает до отправки в TG → в UI открыть `legacy-daily` → History → последний run → читать `details.log`.
 - Сервер упал целиком → в RDP зайти, разбираться.
 - Telegram API лежал → обычно к следующему прогону всё само починится.
+
+### Синхронизация UI с реальностью
+
+Task Scheduler на сервере работает независимо от serverpanel — он не создаёт `BackupHistory` строки напрямую. За видимость в UI отвечают:
+
+- **Фоновый поллер** в `uvicorn` lifespan. По умолчанию раз в 15 минут (`SERVERPANEL_BACKUP_SYNC_INTERVAL_SECONDS=900`) ходит SSH-ом, читает `C:\ProgramData\serverpanel\configs\<id>\last_report.json` и дедупит по `run_id` → создаёт строки истории со статусом/размером/временем. `0` в env — выключить поллер.
+- **Кнопки `⟲ sync`** — на Dashboard (per-server strip), на `/servers/{id}/backups`, на карточке «Бэкапы» в `/servers/{id}`. Тянет прямо сейчас без ожидания таймера.
+
+Проверить что поллер живой: `tail -f ~/Library/Logs/serverpanel.log | grep -i "backup sync"`.
 
 ### Прогон вручную
 

@@ -103,6 +103,9 @@
   - `legacy-weekly-iis` (Sun 04:00, 180d rotation, C:\inetpub + C:\win-acme).
   - `legacy-monthly` (1-е число 05:00, 365d rotation, тот же набор что daily — долгохранящийся снимок).
 - **Telegram-алерты**: на каждый прогон → ✅ / ⚠️ / ❌. Молчание = сигнал тревоги. Токен и chat_id в `.env`.
+- **Видимость в UI**: фоновый поллер (`backup_sync_interval_seconds`, default 15 мин) ходит по SSH, читает `last_report.json` с сервера и создаёт `BackupHistory` строки → scheduled-run'ы появляются на Dashboard + `/servers/{id}` + `/servers/{id}/backups` через несколько минут после завершения. Кнопки `⟲ sync` на тех же страницах тянут мгновенно.
+- **Автозапуск на маке**: LaunchAgent `ru.gefest.serverpanel` (RunAtLoad + KeepAlive), логи в `~/Library/Logs/serverpanel.*`. Обновление: `git pull + launchctl kickstart -k gui/$UID/ru.gefest.serverpanel`. Подробно — [docs/OPERATIONS.md §7](docs/OPERATIONS.md).
+- **UI-полный CRUD**: StorageConfig (new/edit/delete), ProviderConfig (edit creds + Re-discover servers), BackupConfig (builder с source/destination-полями), backup list со статус-колонкой, карточки-сводки на dashboard и странице сервера с цветным dot'ом и последним прогоном.
 - **Emergency backup самой serverpanel**: `.env` + `data/serverpanel.db` + `~/.ssh/serverpanel-seed/` (ключи экспортированы через `serverpanel export-keys`). tar-команда для ежемесячной перекладки в iCloud — в [docs/OPERATIONS.md §4](docs/OPERATIONS.md).
 - **Документация**: [README.md](README.md), [docs/OPERATIONS.md](docs/OPERATIONS.md) (setup с нуля, Telegram, emergency restore, CLI), [docs/RESTORE_TEST.md](docs/RESTORE_TEST.md) (квартальный чеклист), [docs/HISTORY.md](docs/HISTORY.md) (хронология правок).
 - **Тесты**: 27 passed, ruff чистый.

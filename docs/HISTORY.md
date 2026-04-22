@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-04-22 — видимость scheduled-run'ов в UI, CRUD-полнота, автозапуск
+
+- `BackupService.sync_reports_from_server(server)`: по SSH читает `C:\ProgramData\serverpanel\configs\*\last_report.json`, дедупит по `run_id`, создаёт `BackupHistory` строки со статусом/размером/started_at/completed_at для каждого нового прогона. Task Scheduler теперь виден в панели.
+- Фоновый поллер в `lifespan` (`_backup_sync_loop`, interval `Settings.backup_sync_interval_seconds` default 900) — раз в 15 мин проходит по всем серверам. `asyncio.create_task` + cancel на shutdown.
+- Manual `⟲ sync` кнопки: на `/servers/{id}/backups` (крупная), на карточке «Бэкапы» в `/servers/{id}` (мелкая, обрамлена как button). Обе POST'ят в `/servers/{id}/backups/sync`, респектят hidden `next=...` для возврата на ту же страницу.
+- Dashboard: per-server strip «Бэкапы: ✓1 ⚠0 ✕0 — 2 · 22.04 16:40», кликабельный → /backups. Цветной dot (red/yellow/blue/green) по доминантному статусу.
+- Карточка «Бэкапы» на странице сервера: 3 конфига + счётчики + последний прогон + цветная рамка + status-dot. Пустой state `Создать первый →`.
+- Backup list table: новая колонка «Последний запуск» — status-dot + timestamp. Single GROUP-BY-MAX subquery, не N+1.
+- StorageConfig edit в UI (✎ рядом с ✕). Форма не рендерит расшифрованные секреты — пустые поля = сохранить старые.
+- ProviderConfig edit (✎ возле «Провайдер» на детали сервера) + «Re-discover servers» — подхват новых серверов в том же Hetzner-аккаунте без дублей (матч по IP).
+- LaunchAgent `~/Library/LaunchAgents/ru.gefest.serverpanel.plist` (RunAtLoad + KeepAlive). uvicorn больше не в foreground-терминале. Обновление → `launchctl kickstart -k gui/$UID/ru.gefest.serverpanel`. Логи в `~/Library/Logs/`.
+- CLI: `set-robot-creds`, `sync-from-robot` (подтягивает numeric `server_number` из Robot API — фикс ошибки «requires numeric server id, got <IP>»), `export-keys`.
+- Робот API webservice creds (`#ws+…`) настроены, API-статус `configured` + capabilities подтянуты.
+- HISTORY: CLAUDE.md §Статус ужат до «что актуально сейчас», история переехала сюда.
+
 ## 2026-04-22 — прод-ready бэкапы на hetzner-windows
 
 - 3 Task-Scheduler конфига: `legacy-daily` (03:00, 14d), `legacy-weekly-iis` (Sun 04:00, 180d), `legacy-monthly` (1-е число 05:00, 365d). Источники: UNF через VSS + 1C + IIS + tools/xray целиком.
