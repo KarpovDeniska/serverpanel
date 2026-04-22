@@ -1,0 +1,58 @@
+# История изменений serverpanel
+
+Хронологический журнал крупных правок. Актуальное состояние — в `CLAUDE.md`.
+
+---
+
+## 2026-04-22 — прод-ready бэкапы на hetzner-windows
+
+- 3 Task-Scheduler конфига: `legacy-daily` (03:00, 14d), `legacy-weekly-iis` (Sun 04:00, 180d), `legacy-monthly` (1-е число 05:00, 365d). Источники: UNF через VSS + 1C + IIS + tools/xray целиком.
+- Telegram heartbeat на каждом прогоне (success/partial/failed) — молчание = тревога. Креды бота/chat_id в `.env` (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`), подкладываются в `plan.json.notifications.telegram` при build'е plan'а.
+- Zip через `System.IO.Compression.ZipFile.CreateFromDirectory` (Zip64, нет 2 GB баги `Compress-Archive`). Уровень по дефолту `Fastest` — `Settings.backup_zip_level`.
+- Monthly schedule через `schtasks.exe` + `.cmd`-wrapper (CIM MSFT_TaskMonthlyTrigger в PS 5.1 сломан). Формат `monthly:D@HH:MM`.
+- Новые CLI: [`seed-legacy-backups`](../src/serverpanel/main.py), [`export-keys`](../src/serverpanel/main.py) (материализует SSH-ключи в `~/.ssh/serverpanel-seed/`), [`set-robot-creds`](../src/serverpanel/main.py), [`sync-from-robot`](../src/serverpanel/main.py) (подтягивает numeric `server_number` из Robot API).
+- UI: toast-feedback на Install/Uninstall; форма [provider_edit.html](../src/serverpanel/templates/servers/provider_edit.html) с проверкой кредов против Robot API перед сохранением + кнопка «Re-discover servers» под тем же провайдером (матчится по IP, без дублей).
+- Фиксы устойчивости: `cleanup_stale_runs` без cutoff (все `running` → `failed` при startup); JSON-мутации в `BackupHistory.details` пересоздаются новым dict (иначе SQLAlchemy не видит dirty → refresh давал пустой лог); builder-IIFE читает JSON из `<script type="application/json">` (было в `data-*=""` с `tojson` — двойные кавычки рвали атрибут); `[Console]::Out.WriteLine + Flush()` вместо `Write-Host` + `[Console]::OutputEncoding = UTF8 без BOM` — stdout стримится в UI/TG без буферизации и без cp1251-мойсиака.
+- Документация: [docs/OPERATIONS.md](OPERATIONS.md) (setup с нуля, Telegram, emergency restore, CLI), [docs/RESTORE_TEST.md](RESTORE_TEST.md) (квартальный чеклист — в `C:\restore_test\` на том же hetzner-windows).
+- **27 passed** (+2 теста monthly schedule), ruff чистый.
+
+---
+
+## 2026-04-21 — второй проход по «отложенному»
+
+- **Host-key pinning (TOFU)**: миграция [c3d4e5f6a7b8](../alembic/versions/c3d4e5f6a7b8_server_host_key.py) добавляет `Server.ssh_host_key_pub`. [`AsyncSSHClient`](../src/serverpanel/infrastructure/ssh/client.py) принимает `known_host_key=` + `on_host_key_learned=` callback. `BackupService._open_ssh` и `RecoveryService._recover_d_drive` используют/пополняют пин; `_recover_c_drive` стирает ключ после `both`-сценария.
+- **UI — StorageConfig CRUD**: [routers/storages.py](../src/serverpanel/presentation/routers/storages.py) + [templates/storages/edit.html](../src/serverpanel/templates/storages/edit.html). На [servers/detail.html](../src/serverpanel/templates/servers/detail.html) — секция «Хранилища».
+- **UI — визуальный builder sources/destinations**: [static/js/backup_builder.js](../src/serverpanel/static/js/backup_builder.js).
+- **Live-stream `backup.ps1`**: `ssh.execute_stream` с callback, фоновая `_pump()` задача раз в 1с шлёт строки в `_append_log` → WS.
+- **i18n**: [domain/i18n.py](../src/serverpanel/domain/i18n.py) — словарь ru/en, `Settings.language` (default "ru").
+- **Таймауты в Settings**: `install_*`, `recovery_*`, `backup_run_timeout`, `ssh_*` в [config.py](../src/serverpanel/config.py).
+- `datetime.utcnow()` → `datetime.now(datetime.UTC)` во всех 5 местах.
+- Тесты: ssh host-key line roundtrip, i18n completeness, storage CRUD auth gate. **25 passed**, ruff чистый.
+
+---
+
+## 2026-04-21 — промышленный аудит + правки
+
+- **Безопасность**: fail-fast на дефолтный SECRET_KEY/ENCRYPTION_KEY; WebSocket auth+ownership ([ws_auth.py](../src/serverpanel/presentation/ws_auth.py)); `shlex.quote` в scp/recovery SSH; whitelist валидация имени скрипта в `_upload_and_run`; CSRF middleware + double-submit токен ([csrf.py](../src/serverpanel/presentation/csrf.py)); rate-limiter login/register + rotate session ([ratelimit.py](../src/serverpanel/presentation/ratelimit.py)); регистрация открыта только до первого admin; `StorageConfigRepository.get_by_id_for_user` (IDOR).
+- **Надёжность**: `run_supervised` ([background.py](../src/serverpanel/presentation/background.py)); `cleanup_stale_runs` на startup ([engine.py](../src/serverpanel/infrastructure/database/engine.py)); `/health` endpoint.
+- **Архитектура**: `ProgressReporter` Protocol ([domain/progress.py](../src/serverpanel/domain/progress.py)) — убрал импорт `ws_manager` из application-слоя; `WsProgressReporter` адаптер в presentation; `RecoveryService` через `create_storage` фабрику.
+- **Deployability**: `importlib.resources` для templates/static; общий [templates.py](../src/serverpanel/presentation/templates.py); host/port в settings; upper bounds на все deps.
+- **Hygiene**: базовые тесты — **18 зелёных**; GitHub Actions CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)); ruff select E/F/I/B/UP/C4/S.
+
+---
+
+## 2026-04-21 — миграция из hetzner-recovery
+
+Вся функциональность старого Flask-проекта `hetzner-recovery` влита в `serverpanel` v2.
+
+- `StorageProvider` → [infrastructure/providers/storage/hetzner_storagebox.py](../src/serverpanel/infrastructure/providers/storage/hetzner_storagebox.py) (SFTP, авторегистрация в `main.lifespan`).
+- Pydantic-схемы `BackupSource`/`BackupDestination` → [domain/backup.py](../src/serverpanel/domain/backup.py) (discriminated union `local` | `storage`).
+- Alembic baseline + `recovery_history` migration (`init_db` прогоняет `alembic upgrade head`, легаси БД stamp'ится).
+- `BackupService` → [application/services/backup_service.py](../src/serverpanel/application/services/backup_service.py): ручной `run()` + `install_schedule()` / `uninstall_schedule()`.
+- `backup.ps1` → [application/static/scripts/backup.ps1](../src/serverpanel/application/static/scripts/backup.ps1): VSS, robocopy, zip, local + SB, ротация.
+- `RecoveryService` + таблица `RecoveryHistory` → [application/services/recovery_service.py](../src/serverpanel/application/services/recovery_service.py): 3 сценария (`c_drive`/`d_drive`/`both`).
+- Recovery-скрипты → [application/static/scripts/recovery/](../src/serverpanel/application/static/scripts/recovery/).
+- Роуты: `/servers/{id}/backups` + `/servers/{id}/recovery` + WS-прогресс.
+- CLI-импорт: `serverpanel import-hetzner-recovery <yaml> --user-email X`.
+
+Папка `hetzner-recovery/` перенесена в `archive/hetzner-recovery/`. README.md создан (подключить сервер → настроить бэкап → тест восстановления).
