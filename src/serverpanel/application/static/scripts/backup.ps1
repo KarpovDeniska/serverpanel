@@ -140,10 +140,30 @@ function Stage-Source($src, $stageBase) {
     if ($src.compress -eq "zip") {
         $zipPath = "$stagePath.zip"
         if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+        # Compress-Archive in PS 5.1 silently uses a 32-bit stream size and
+        # blows up with "Stream was too long" once any single file > 2 GB (or
+        # total > 2 GB depending on the path). System.IO.Compression.ZipFile
+        # uses Zip64 automatically, so call it directly.
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
         if ((Get-Item -LiteralPath $stagePath).PSIsContainer) {
-            Compress-Archive -Path (Join-Path $stagePath '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
+            [System.IO.Compression.ZipFile]::CreateFromDirectory(
+                $stagePath, $zipPath,
+                [System.IO.Compression.CompressionLevel]::Optimal,
+                $false  # includeBaseDirectory: contents only, matches old Compress-Archive `path\*` behavior
+            )
         } else {
-            Compress-Archive -LiteralPath $stagePath -DestinationPath $zipPath -CompressionLevel Optimal -Force
+            # single file — create archive and write one entry
+            $zipStream = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::Create)
+            try {
+                $zip = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                        $zip, $stagePath, (Split-Path $stagePath -Leaf),
+                        [System.IO.Compression.CompressionLevel]::Optimal
+                    ) | Out-Null
+                } finally { $zip.Dispose() }
+            } finally { $zipStream.Dispose() }
         }
         Remove-Item -LiteralPath $stagePath -Recurse -Force -ErrorAction SilentlyContinue
         return $zipPath
@@ -184,10 +204,26 @@ function Invoke-LocalDestination($dest, $sourcesByAlias, $today) {
             if ($src.compress -eq "zip") {
                 $zipPath = "$dstPath.zip"
                 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+                # See Stage-Source for why we don't use Compress-Archive (2 GB limit in PS 5.1).
+                Add-Type -AssemblyName System.IO.Compression
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
                 if ((Get-Item -LiteralPath $dstPath).PSIsContainer) {
-                    Compress-Archive -Path (Join-Path $dstPath '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
+                    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+                        $dstPath, $zipPath,
+                        [System.IO.Compression.CompressionLevel]::Optimal,
+                        $false
+                    )
                 } else {
-                    Compress-Archive -LiteralPath $dstPath -DestinationPath $zipPath -CompressionLevel Optimal -Force
+                    $zipStream = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::Create)
+                    try {
+                        $zip = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create)
+                        try {
+                            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                                $zip, $dstPath, (Split-Path $dstPath -Leaf),
+                                [System.IO.Compression.CompressionLevel]::Optimal
+                            ) | Out-Null
+                        } finally { $zip.Dispose() }
+                    } finally { $zipStream.Dispose() }
                 }
                 Remove-Item -LiteralPath $dstPath -Recurse -Force -ErrorAction SilentlyContinue
                 $dstPath = $zipPath
