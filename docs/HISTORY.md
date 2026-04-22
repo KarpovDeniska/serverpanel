@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-04-22 — disaster recovery для мака
+
+- `scripts/bootstrap-mac.sh` — one-command setup: Xcode CLT, Homebrew, python@3.12, clone, venv, pip install, опциональная распаковка tar-архива через `SERVERPANEL_BACKUP_TAR=`, LaunchAgent, health-check. Идемпотентный. Генерит свежий `.env` если архив не задан.
+- `docs/OPERATIONS.md` — добавлен §1.0-auto (скрипт), §1.0 (системные зависимости на голом маке: `xcode-select --install`, `/bin/bash -c "$(curl ... install.sh)"`, `brew install python@3.12`), §4 обновлён ссылкой на скрипт.
+- Проверено сквозное восстановление на текущем маке: `tar czf` свежего архива → полный снос (unload LaunchAgent, `rm -rf ~/projects/serverpanel ~/.ssh/serverpanel-seed`, чистка логов) → `git clone` + `bash bootstrap-mac.sh` с `SERVERPANEL_BACKUP_TAR=…` → панель на `127.0.0.1:5000`, один uvicorn-процесс под launchd, все конфиги/история/ключи на месте.
+- Документация: ARCHITECTURE.md вынесен из CLAUDE.md (CLAUDE.md ужат до интро + ссылок + статуса).
+
 ## 2026-04-22 — видимость scheduled-run'ов в UI, CRUD-полнота, автозапуск
 
 - `BackupService.sync_reports_from_server(server)`: по SSH читает `C:\ProgramData\serverpanel\configs\*\last_report.json`, дедупит по `run_id`, создаёт `BackupHistory` строки со статусом/размером/started_at/completed_at для каждого нового прогона. Task Scheduler теперь виден в панели.
