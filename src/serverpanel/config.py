@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -87,6 +88,20 @@ class Settings(BaseSettings):
                 "Generate with: python -c \"from cryptography.fernet import Fernet; "
                 "print(Fernet.generate_key().decode())\""
             )
+        # Fernet() parses the key and raises ValueError on malformed input
+        # (wrong length, non-base64 chars, trailing whitespace). Catching it
+        # at startup surfaces .env typos immediately instead of at the first
+        # decrypt_json call — where the same error looks like "credentials
+        # corrupted" in the UI and wastes time.
+        try:
+            Fernet(self.encryption_key.encode())
+        except ValueError as e:
+            raise ValueError(
+                f"ENCRYPTION_KEY is not a valid Fernet key ({e}). "
+                "Must be urlsafe-base64 of 32 bytes. Generate with: "
+                'python -c "from cryptography.fernet import Fernet; '
+                'print(Fernet.generate_key().decode())"'
+            ) from e
         return self
 
 
