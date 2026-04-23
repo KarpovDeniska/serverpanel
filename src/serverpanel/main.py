@@ -89,8 +89,12 @@ async def lifespan(app: FastAPI):
         sync_task.cancel()
         try:
             await sync_task
-        except (asyncio.CancelledError, Exception):
+        except asyncio.CancelledError:
             pass
+        except Exception as e:
+            import logging as _logging
+
+            _logging.getLogger("serverpanel.sync").warning("sync loop crashed on shutdown: %s", e)
     await dispose_db()
 
 
@@ -314,6 +318,7 @@ def cli():
 
     if args.command == "seed-legacy-backups":
         from sqlalchemy import select
+
         from serverpanel.application.importers.hetzner_recovery import (
             _upsert_daily_backup,
             _upsert_monthly_backup,
@@ -381,7 +386,9 @@ def cli():
     if args.command == "export-keys":
         import os
         import stat
+
         from sqlalchemy import select
+
         from serverpanel.infrastructure.crypto import decrypt_json
         from serverpanel.infrastructure.database.engine import (
             dispose_db as _dispose,
@@ -416,8 +423,10 @@ def cli():
                     p.write_text(pk, encoding="utf-8")
                     try:
                         p.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600 — ssh refuses world-readable
-                    except Exception:
-                        pass
+                    except OSError as e:
+                        # Windows NTFS can reject POSIX chmod bits; ssh on
+                        # Windows doesn't enforce 0600 anyway.
+                        sys.stderr.write(f"WARN: chmod 0600 on {p} failed: {e}\n")
                     written.append((f"server {srv.name}", str(p)))
 
                 for stor in (await db.execute(select(StorageConfig))).scalars().all():
@@ -435,8 +444,8 @@ def cli():
                     p.write_text(pk, encoding="utf-8")
                     try:
                         p.chmod(stat.S_IRUSR | stat.S_IWUSR)
-                    except Exception:
-                        pass
+                    except OSError as e:
+                        sys.stderr.write(f"WARN: chmod 0600 on {p} failed: {e}\n")
                     written.append((f"storage {stor.name}", str(p)))
             await _dispose()
             if not written:
@@ -451,6 +460,7 @@ def cli():
 
     if args.command == "sync-from-robot":
         from sqlalchemy import select
+
         from serverpanel.infrastructure.crypto import decrypt_json
         from serverpanel.infrastructure.database.engine import (
             dispose_db as _dispose,
@@ -530,6 +540,7 @@ def cli():
 
     if args.command == "set-robot-creds":
         from sqlalchemy import select
+
         from serverpanel.infrastructure.crypto import encrypt_json
         from serverpanel.infrastructure.database.engine import (
             dispose_db as _dispose,

@@ -43,9 +43,14 @@ async def _compute_backup_summary(db: AsyncSession, server_id: int) -> dict:
     counts per status, most recent run across all configs. Used by the
     server detail page card and by the dashboard overview.
     """
-    from sqlalchemy import func, select as _select
+    from sqlalchemy import func
+    from sqlalchemy import select as _select
+
     from serverpanel.infrastructure.database.models import (
-        BackupConfig as _BC, BackupHistory as _BH,
+        BackupConfig as _BC,
+    )
+    from serverpanel.infrastructure.database.models import (
+        BackupHistory as _BH,
     )
 
     cfgs = (await db.execute(
@@ -214,8 +219,14 @@ async def provider_edit_page(
     try:
         decrypted = decrypt_json(pc.credentials_encrypted)
         creds_hint = decrypted.get("robot_user", "")
-    except Exception:
-        pass
+    except Exception as e:
+        # Corrupt creds / wrong ENCRYPTION_KEY — leave the hint blank, do
+        # not fail the page. The user needs to re-enter credentials anyway.
+        import logging
+        logging.getLogger(__name__).warning(
+            "provider_edit: cannot decrypt credentials for %s: %s",
+            pc.id, e,
+        )
     return templates.TemplateResponse(request, "servers/provider_edit.html", {
         "user": user,
         "server": server,

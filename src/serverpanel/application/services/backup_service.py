@@ -715,11 +715,15 @@ class BackupService:
                 _, _, report_path = _scheduled_paths(cid)
                 try:
                     report_bytes = await ssh.fetch_file(report_path)
-                except Exception:
+                except Exception as e:
+                    # No last_report yet, or transient SSH/SFTP hiccup — skip
+                    # this config; next sync cycle will retry.
+                    log.debug("sync: cannot fetch %s: %s", report_path, e)
                     continue
                 try:
                     report = json.loads(report_bytes.decode("utf-8"))
-                except Exception:
+                except Exception as e:
+                    log.warning("sync: malformed JSON in %s: %s", report_path, e)
                     continue
 
                 run_id = report.get("run_id")
@@ -741,8 +745,10 @@ class BackupService:
                 started_at = None
                 try:
                     started_at = datetime.datetime.strptime(run_id, "%Y%m%d_%H%M%S")
-                except Exception:
-                    pass
+                except ValueError as e:
+                    # Old/foreign run_id format — surface as None, do not drop
+                    # the whole history row for it.
+                    log.debug("sync: unparseable run_id %r: %s", run_id, e)
                 completed_at = None
                 try:
                     run_at = report.get("run_at")
@@ -750,8 +756,8 @@ class BackupService:
                         completed_at = datetime.datetime.fromisoformat(
                             run_at.replace("Z", "+00:00")
                         )
-                except Exception:
-                    pass
+                except ValueError as e:
+                    log.debug("sync: unparseable run_at %r: %s", report.get("run_at"), e)
 
                 dests = report.get("destinations", [])
                 ok = [d for d in dests if d.get("status") == "success"]
