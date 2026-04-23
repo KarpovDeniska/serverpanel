@@ -52,6 +52,13 @@ REMOTE_REPORT = REMOTE_DIR + r"\report.json"
 # Scheduled (per-config) — task invokes backup.ps1 against these frozen paths.
 REMOTE_CONFIGS_DIR = REMOTE_DIR + r"\configs"
 
+# How long Task Scheduler waits before killing a stuck backup run. 30 min is
+# longer than the slowest observed legit run (~5 min for 1.5 GB) but still
+# short enough that a genuine hang produces a Telegram alert the same morning.
+# Both the installer and the post-install XML validator pin on this value —
+# keep them in sync by reading the single constant.
+TASK_EXECUTION_TIME_LIMIT = "PT30M"
+
 
 def _task_name(config_id: int) -> str:
     return f"serverpanel-backup-{config_id}"
@@ -552,15 +559,15 @@ class BackupService:
                 "Start-Sleep -Milliseconds 500; "
                 f"$t = Get-ScheduledTask -TaskName '{task}'; "
                 "$s = $t.Settings; "
-                "$s.ExecutionTimeLimit = 'PT30M'; "
+                f"$s.ExecutionTimeLimit = '{TASK_EXECUTION_TIME_LIMIT}'; "
                 f"Set-ScheduledTask -TaskName '{task}' -Settings $s | Out-Null"
                 '"'
             )
             cr = await ssh.execute(clamp_cmd, timeout=60)
             if cr.exit_code != 0:
                 raise RuntimeError(
-                    "Set-ScheduledTask (ExecutionTimeLimit=PT30M) failed "
-                    f"(exit {cr.exit_code}): {(cr.stderr or cr.stdout)[-400:]}"
+                    f"Set-ScheduledTask (ExecutionTimeLimit={TASK_EXECUTION_TIME_LIMIT}) "
+                    f"failed (exit {cr.exit_code}): {(cr.stderr or cr.stdout)[-400:]}"
                 )
 
             await self._validate_scheduled_task(ssh, task, wrapper_path)
@@ -568,10 +575,15 @@ class BackupService:
     async def _validate_scheduled_task(
         self, ssh: AsyncSSHClient, task: str, wrapper_path: str
     ) -> None:
-        """Read the just-registered task XML and assert that schtasks parsed
-        the wrapper path as a single <Command> with no leaked <Arguments>
-        or <WorkingDirectory>. Catches quote-escaping regressions like the
-        one that silently broke serverpanel-backup-2 on 2026-04-22.
+        """Read the just-registered task XML and assert the three invariants
+        that can regress silently:
+
+        1. ``<Command>`` is exactly the wrapper path — no quote-escape bug
+           leaking args into the command (the 2026-04-22 regression).
+        2. No ``<Arguments>``/``<WorkingDirectory>`` bleed.
+        3. ``<ExecutionTimeLimit>`` is the clamped value — if the clamp step
+           silently failed (wrong CIM overload, stale object, etc.) the
+           default 72 h would let a hang run until the next morning.
         """
         r = await ssh.execute(f'schtasks /query /xml /tn "{task}"', timeout=30)
         if r.exit_code != 0:
@@ -590,6 +602,12 @@ class BackupService:
             raise RuntimeError(
                 f"post-install validation: task '{task}' has leaked "
                 f"<Arguments>/<WorkingDirectory>. XML tail: {xml[-600:]}"
+            )
+        limit_line = f"<ExecutionTimeLimit>{TASK_EXECUTION_TIME_LIMIT}</ExecutionTimeLimit>"
+        if limit_line not in xml:
+            raise RuntimeError(
+                f"post-install validation: task '{task}' missing "
+                f"{limit_line} — clamp silently failed. XML tail: {xml[-600:]}"
             )
 
     async def fetch_live_progress(
