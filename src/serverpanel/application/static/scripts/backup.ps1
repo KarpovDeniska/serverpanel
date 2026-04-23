@@ -526,7 +526,44 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
                     throw "scp exit $($scpRes.ExitCode): $tail"
                 }
 
-                $rec.items += @{ alias = $alias; status = "success"; remote_path = $remoteTarget; size_bytes = $sz }
+                # Integrity: re-stat the remote object and compare byte counts.
+                # scp can exit 0 on a truncated upload (connection reset mid-
+                # stream, ENOSPC on the Storage Box, SIGTERM), so "exit 0"
+                # alone is not proof the file is whole. Hetzner SB's limited
+                # shell does not ship sha256sum, but `sftp ls -l` is always
+                # available — size check closes the 90% case (abort / quota /
+                # timeout). Directories are skipped here; a recursive size
+                # walk is a separate follow-up.
+                $remoteSize = $null
+                $integrityStatus = $null
+                if ($isDir) {
+                    $integrityStatus = "skipped_dir"
+                } else {
+                    $lsLines = & $RunSftpBatch "ls -l $remoteTarget`n"
+                    foreach ($line in $lsLines) {
+                        $t = $line.Trim()
+                        # `-rwxr-xr-x 1 user group 12345 Apr 23 14:30 path`
+                        if ($t.StartsWith('-')) {
+                            $cols = $t -split '\s+'
+                            if ($cols.Count -ge 5) {
+                                $parsed = [int64]0
+                                if ([int64]::TryParse($cols[4], [ref]$parsed)) {
+                                    $remoteSize = $parsed
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    if ($null -eq $remoteSize) {
+                        throw "integrity: cannot stat remote $remoteTarget (sftp ls -l returned no file entry)"
+                    }
+                    if ($remoteSize -ne [int64]$sz) {
+                        throw "integrity: size mismatch on $remoteTarget (local=$sz remote=$remoteSize)"
+                    }
+                    $integrityStatus = "verified"
+                }
+
+                $rec.items += @{ alias = $alias; status = "success"; remote_path = $remoteTarget; size_bytes = $sz; remote_size = $remoteSize; integrity = $integrityStatus }
                 $rec.size_bytes += $sz
                 $planDone += [int64]$sz
                 Write-ProgressTick -BytesDone $planDone -BytesTotal $planTotal -CurrentItem $alias
