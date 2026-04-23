@@ -47,6 +47,15 @@ serverpanel = "serverpanel.main:cli"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# aiosqlite emits ResourceWarning when a Connection is GC'd before close,
+# which happens in the reload-based test harness in test_presentation/*:
+# alembic's run_migrations_online() spins its own event loop inside a
+# thread, and that loop exits before the aiosqlite connection's
+# __del__ runs. The actual DB engine on the app side is disposed via
+# lifespan_context — this is only noise from Alembic's short-lived pool.
+filterwarnings = [
+    "ignore::ResourceWarning:aiosqlite.core",
+]
 
 [tool.ruff]
 target-version = "py312"
