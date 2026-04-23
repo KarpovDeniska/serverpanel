@@ -279,7 +279,10 @@ function Invoke-LocalDestination($dest, $sourcesByAlias, $today) {
         }
     }
 
-    # Rotation - only meaningful when date_folder is on
+    # Rotation - only meaningful when date_folder is on.
+    # Logic mirrored in src/serverpanel/domain/rotation.py (select_expired +
+    # compute_cutoff) — tests/test_domain/test_rotation.py pins the contract.
+    # Keep both sides in sync when touching the regex or the cutoff semantics.
     if ($dest.date_folder -and $dest.rotation_days -gt 0) {
         $cutoff = (Get-Date).AddDays(-$dest.rotation_days).ToString("yyyy-MM-dd")
         try {
@@ -585,6 +588,9 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         # source subdirs, and sftp's `rm $dir/*` is not recursive (it only
         # removes first-level files, then `rmdir` fails on the still-non-
         # empty dir, silently leaving old backups around forever).
+        # Selection logic mirrored in src/serverpanel/domain/rotation.py —
+        # tests/test_domain/test_rotation.py pins the "full path vs basename"
+        # regression that made this loop a no-op from day one.
         if ($dest.date_folder -and $dest.rotation_days -gt 0) {
             $cutoff = (Get-Date).AddDays(-$dest.rotation_days).ToString("yyyy-MM-dd")
             try {
