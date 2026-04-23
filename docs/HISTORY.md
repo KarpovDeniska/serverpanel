@@ -4,6 +4,44 @@
 
 ---
 
+## 2026-04-23 — byte-level progress, watchdog, reliability fixes
+
+**Бэкапы проверены живьём на hetzner-windows — 3 подряд прогона серии
+`serverpanel-backup-2`, 9/9 алиасов success каждый, 1.83 GB / ~3 мин.
+На третьем сработала rotation — снесла 19-дневную `2026-04-04/` на боксе.**
+
+**Новая фича — byte-level progress в UI**
+- Чистый домен-VO `BackupProgress` + `is_stalled()` в `domain/backup_progress.py` (15 unit-тестов).
+- Alembic `e5a6b7c8d9e0`: `bytes_total/done`, `current_item`, `progress_updated_at` на `backup_history`; `stall_threshold_seconds` (default 120s) на `backup_configs`.
+- `backup.ps1` пишет `progress.json` атомарно (temp + move), дискретные тики per-alias + отдельный heartbeat-job каждые 5 с (обновляет только `updated_at`, чтобы медленный scp не выглядел как stall).
+- `BackupService.fetch_live_progress` / `sync_progress_to_history` — поллер по SSH.
+- `GET /servers/{id}/backups/{cfg}/runs/{h}/progress` — компактный JSON с phase/percent/age. `templates/backups/run.html` поллит раз в 5 с и рисует вторую полоску (blue running, red stalled, green finished).
+
+**Watchdog — защита от «тихо убит Task Scheduler-ом»**
+- Новый `watchdog.ps1` — ASCII-only (чтобы PS 5.1 на ru-RU не ломал парсинг), шлёт `[X] Backup hung / killed by timeout` в Telegram если `last_report.json` не свежее `StartedEpoch`.
+- Wrapper `trigger.cmd` теперь всегда двухшаговый: `backup.ps1` → `watchdog.ps1` (через `%__sp_started%` захвачен UTC-epoch ДО backup.ps1, watchdog сверяет).
+
+**Schtasks unification**
+- Все триггеры (daily/weekly/monthly) регистрируются через один путь: `trigger.cmd` + `schtasks /create`. Раньше monthly шёл через schtasks, а daily/weekly через `Register-ScheduledTask` — последний тихо ломался на escape-е кавычек (поле `<Arguments>` / `<WorkingDirectory>` съедало хвост команды, задача стартовала и падала с `ERROR_DIRECTORY 0x8007010B`).
+- После регистрации — `ExecutionTimeLimit` клампится в `PT30M`, `_validate_scheduled_task` читает XML обратно и орёт на `<Arguments>`/`<WorkingDirectory>` если вылезли. Регрессии вроде 2026-04-22-ой теперь не пройдут тихо.
+- Фикс clamp: `Set-ScheduledTask -InputObject $t` падал `0x80070057` сразу после `schtasks /create` (stale CIM). Переехали на `Set-ScheduledTask -TaskName ... -Settings $s` + `Start-Sleep 500ms`.
+
+**backup.ps1 — 6 отдельных фиксов надёжности**
+- **date_folder live**: использует `Get-Date -Format yyyy-MM-dd` в рантайме, а не `$plan.date_folder` из `install_schedule` time. Старое поведение пинило КАЖДЫЙ nightly в одну дата-папку навсегда и ломало rotation + колизило scp.
+- **icacls by SID**: под SYSTEM `$env:USERNAME` = `"<HOST>$"` (машинный аккаунт), icacls не мапит в ACE → ключ оставался с нулевыми ACL → ssh падал с `Permission denied / exit 255`. Теперь — текущий SID + `S-1-5-18` (SYSTEM) + `S-1-5-32-544` (Administrators).
+- **scp purge-before-upload**: ssh `rm -rf` на target перед scp. Без этого `scp -r` на ЛЮБОЙ существующий target создавал подпапку-дубликат `target/<basename>/` и потом падал с Permission denied от старых файлов при повторном запуске того же дня (видно было как `…/1c_files/1c_files/…` на боксе).
+- **Rotation basename**: sftp `ls -1 backups/daily/` возвращает ПОЛНЫЕ пути (`backups/daily/2026-04-04`), а regex `^\d{4}-\d{2}-\d{2}$` ждал basename. Rotation была **silent no-op с самого начала проекта** — старые дата-папки копились вечно. Фикс: `($_ -split '/')[-1]`. Попутно — удаление через ssh `rm -rf` (sftp `rm $d/*` не рекурсивен, rmdir не мог удалить не-пустую папку с подпапками источников).
+- **Telegram totalMb**: `Measure-Object -Property size_bytes` не видит ключи хэш-таблицы в PS 5.1 → на многогигабайтных прогонах показывало `0 MB`. Теперь ручное суммирование + подробный список failed-алиасов с их стэк-трейсами scp.
+- **scp stderr в report**: раньше терялся (выход только exit code). Теперь `$RunScp` возвращает `@{ ExitCode; StdErr }`, хвост (до 1200 символов) попадает в `last_report.json / items[*].error`.
+
+**Recovery-скрипты**: тот же icacls-by-SID в `restore.ps1` и `restore_data.ps1`.
+
+**Documentation**: `docs/OPERATIONS.md` → «Обновление после git pull» теперь упоминает `uv run alembic upgrade head` (без него новые миграции дают `OperationalError: no such column`).
+
+Тесты: 42 passed.
+
+---
+
 ## 2026-04-22 — Self-backup в UI
 
 - Новый сервис `application/services/self_backup_service.py:write_self_backup(fileobj)` — стримит tar.gz (`.env` + `data/serverpanel.db` + `~/.ssh/serverpanel-seed/`) в переданный binary stream. Имя файла через `suggested_filename()` (timestamp).
