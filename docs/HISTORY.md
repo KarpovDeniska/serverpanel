@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-04-23 (вечер) — аудит, integrity-check, первый RESTORE_TEST, tests+42
+
+Проход по архитектурному аудиту (4 параллельных review-агента — security / reliability / architecture / code quality). 5 пунктов закрыты, 1 Critical отложен в TODO.
+
+**Integrity-check после scp** (`3856171`)
+- `backup.ps1` после каждого успешного scp снимает remote-size через `sftp ls -l` и сверяет с локальным. Mismatch → `throw` → item=failed → Telegram-alert автоматом через существующий catch. В item теперь `remote_size` + `integrity` (`verified` / `skipped_dir`). Закрывает «scp exit 0 на усечённом upload» (обрыв, ENOSPC, timeout). SHA256 отложен — Hetzner SB имеет ограниченный shell, `sha256sum` не гарантирован; размер ловит 90% кейсов. Рекурсивная сверка директорий (non-zip source) — следующей итерацией.
+- 3 теста в `tests/test_application/test_backup_report_integrity.py` (verified / mismatch / skipped_dir).
+- **Живо подтверждён на прогоне 21:06 МСК**: UNF 1.49 GB → `integrity=verified`, remote_size match байт-в-байт, ibases тоже verified.
+
+**Первый RESTORE_TEST с дня 1** (`805e5ee`)
+- UNF.zip из `backups/daily/2026-04-23/` (SB) → `scp` на hetzner-windows (1 487 451 346 B, SHA256 `67F70C32…15EBE5AC`) → `Expand-Archive` → `1Cv8.1CD` 2.24 GB + `1Cv8Log/` 908 MB + `1Cv8FTxt/` 777 MB → регистрация в 1cestart как `UNF-RESTORE-TEST-2026-04-23` → база открывается, spot-check OK.
+- Журнал в [docs/RESTORE_TEST.md](RESTORE_TEST.md) обновлён первой записью.
+- Обнаружено и записано в TODO: **restore-pipeline отсутствует** — сегодня ручные scp + Expand-Archive, хочется `serverpanel restore-from-backup <server> --date Y` симметрично backup-у (restore.ps1 + RestoreService + CLI/UI). Приоритет Critical, ориентир 1-2 дня. Детали в `CLAUDE.md`.
+
+**Rotation — эталон + 13 тестов** (`cc65447`)
+- Логика rotation из `backup.ps1` (local + remote) вынесена в чистую Python-функцию `domain/rotation.py:select_expired(names, cutoff)` + `compute_cutoff(today, rotation_days)`. Single source of truth.
+- 13 кейсов покрывают в том числе day-one-баг («sftp ls -1 вернул full paths, regex на basename молча не матчил»). В обеих rotation-секциях `backup.ps1` — комментарии со ссылкой на `rotation.py` и тесты, чтобы любой будущий правщик видел связь.
+
+**ENCRYPTION_KEY валидируется как Fernet на старте** (`066287b`)
+- В `_validate_secrets` пытаемся `Fernet(key.encode())` — библиотека сама проверяет формат (urlsafe-base64 32 bytes). Опечатка в `.env` ловится на старте с ясным сообщением «ENCRYPTION_KEY is not a valid Fernet key (...)», а не на первом decrypt где выглядит как «credentials corrupted».
+- Существующий `test_prod_ok_when_both_set` с `"a"*44` проходил только потому что валидатор не проверял формат — заменён на `Fernet.generate_key()`. +2 теста на malformed / wrong-length.
+
+**Валидация `<ExecutionTimeLimit>` после schtasks** (`bfb9b34`)
+- `_validate_scheduled_task` теперь проверяет **третий** инвариант: `<ExecutionTimeLimit>PT30M</ExecutionTimeLimit>` в XML задачи. Если `Set-ScheduledTask` молча не применил clamp (stale CIM, wrong overload), задача осталась бы с дефолтом `PT72H` — завис бы молотил до утра. Значение вынесено в константу `TASK_EXECUTION_TIME_LIMIT`, используется и в clamp, и в validator (не разъедется).
+- 7 тестов с mock `AsyncSSHClient`: happy path + 4 кейса нарушения + отсутствие ExecutionTimeLimit + дефолт PT72H.
+
+**runId в UTC — корректная длительность scheduled-run** (`063dd34`)
+- `backup.ps1` пишет `$runId` через `Get-Date.ToUniversalTime`, так что `started_at` (парсится из run_id как naive) и `completed_at` (парсится из `run_at=ISO UTC`, в БД хранится без tz) лежат в одной временной базе. Раньше на scheduled-run показывалось отрицательное число секунд (`-6927s` = минус UTC+2 смещение CEST).
+
+**Ruff + pytest cleanup** (`24632d0`, `690723d`)
+- 4 bare `except: pass` заменены на явное логирование (chmod-на-Windows → debug, sync-loop crash на shutdown → warning, corrupt creds в `/servers/{id}/provider/edit` → warning, decrypt fail в sync → warning).
+- Auto-fix: I001 (отсортированные импорты в alembic), UP007/UP035 (`X | Y` вместо `Optional[X]`/`Union[X,Y]`).
+- alembic.ini: `path_separator = os` — гасит DeprecationWarning из alembic 1.14+.
+- pyproject pytest: `filterwarnings = ["ignore::ResourceWarning:aiosqlite.core"]` — aiosqlite.Connection.__del__ шумит когда event loop alembic-а закрывается раньше GC (alembic.upgrade гоняется в своём thread'е + asyncio.run).
+- **pytest** теперь 68 passed, **0 warnings**. **ruff** — all checks passed.
+
+**Итого**: 42 → **68 passed** (+26 новых тестов), 8 атомарных коммитов, прод-пайплайн не трогал кроме контролируемого manual-run'а для проверки integrity-фикса. Один Critical TODO — restore-pipeline — отложен в отдельную сессию с plan mode.
+
+---
+
 ## 2026-04-23 — byte-level progress, watchdog, reliability fixes
 
 **Бэкапы проверены живьём на hetzner-windows — 3 подряд прогона серии
