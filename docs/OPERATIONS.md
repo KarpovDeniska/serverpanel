@@ -344,8 +344,11 @@ launchctl load -w ~/Library/LaunchAgents/ru.gefest.serverpanel.plist
 ```bash
 cd ~/projects/serverpanel
 git pull origin main
+uv run alembic upgrade head        # если коммит приносит новые миграции
 launchctl kickstart -k gui/$(id -u)/ru.gefest.serverpanel
 ```
+
+Команду `alembic upgrade head` безопасно звать всегда — она no-op если миграций нет. Пропуск миграции после `git pull` даёт `OperationalError: no such column` на страницах, где используются новые поля.
 
 ### Логи
 

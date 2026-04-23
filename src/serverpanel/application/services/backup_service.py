@@ -542,11 +542,18 @@ class BackupService:
             # Default ExecutionTimeLimit via `schtasks` is 72 h, which makes
             # "kill a stuck backup" meaningless. Clamp to 30 min — watchdog.ps1
             # then produces a Telegram alert on the kill.
+            # Right after `schtasks /create`, Get-ScheduledTask can return a
+            # stale CIM object; `Set-ScheduledTask -InputObject $t` then fails
+            # with 0x80070057 ("The parameter is incorrect"). Re-read by
+            # name, mutate a local Settings copy, and push via
+            # `-TaskName + -Settings` which is the robust overload.
             clamp_cmd = (
                 'powershell -NoProfile -Command "'
+                "Start-Sleep -Milliseconds 500; "
                 f"$t = Get-ScheduledTask -TaskName '{task}'; "
-                "$t.Settings.ExecutionTimeLimit = 'PT30M'; "
-                "Set-ScheduledTask -InputObject $t | Out-Null"
+                "$s = $t.Settings; "
+                "$s.ExecutionTimeLimit = 'PT30M'; "
+                f"Set-ScheduledTask -TaskName '{task}' -Settings $s | Out-Null"
                 '"'
             )
             cr = await ssh.execute(clamp_cmd, timeout=60)
