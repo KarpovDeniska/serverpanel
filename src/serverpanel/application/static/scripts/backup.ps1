@@ -17,7 +17,12 @@ $ProgressPreference = "SilentlyContinue"
 # defaults to the system OEM codepage and paramiko reads as UTF-8.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$runId = (Get-Date).ToString("yyyyMMdd_HHmmss")
+# runId must be UTC so that BackupService.sync_reports_from_server can
+# compute a correct duration: started_at is parsed from this string as a
+# naive datetime, completed_at is parsed from report.run_at (ISO UTC) and
+# then stored in a DB column without tz — both sides must share the same
+# time base or `completed_at - started_at` becomes minus-the-offset.
+$runId = (Get-Date).ToUniversalTime().ToString("yyyyMMdd_HHmmss")
 # Staging lives outside ProgramData\serverpanel so that a source pointing at
 # that directory (or any of its parents) does not end up copying staging into
 # itself on every iteration — robocopy /MIR would loop until the disk dies.

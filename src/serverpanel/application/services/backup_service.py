@@ -741,7 +741,12 @@ class BackupService:
                 if existing and (existing.details or {}).get("run_id") == run_id:
                     continue
 
-                # run_id is "YYYYMMDD_HHMMSS" in server-local time; run_at is ISO UTC.
+                # run_id is "YYYYMMDD_HHMMSS" in UTC (since backup.ps1 pins it
+                # to Get-Date.ToUniversalTime); run_at is ISO UTC. Both parsed
+                # to naive datetimes with the same time base, so the
+                # `completed_at - started_at` duration on the detail page is
+                # correct — historically these two strings lived in different
+                # zones and duration rendered as a negative number.
                 started_at = None
                 try:
                     started_at = datetime.datetime.strptime(run_id, "%Y%m%d_%H%M%S")
