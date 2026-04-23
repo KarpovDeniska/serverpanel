@@ -63,6 +63,20 @@
                 {% endfor %}
             </ul>
 
+            {# Byte-level live progress #}
+            <div id="byte-progress" class="pt-2">
+                <div class="flex justify-between text-xs mb-1">
+                    <span id="byte-label" class="text-dark-muted">—</span>
+                    <span id="byte-pct" class="text-dark-muted">—</span>
+                </div>
+                <div class="w-full bg-dark-bg rounded h-1.5 overflow-hidden">
+                    <div id="byte-bar"
+                         class="h-full bg-blue-400 transition-all"
+                         style="width: 0%"></div>
+                </div>
+                <div id="byte-age" class="text-[10px] text-dark-muted mt-0.5"></div>
+            </div>
+
             {% if history.error_message %}
             <div class="bg-red-900/30 border border-red-700 text-red-400 px-3 py-2 rounded text-xs">
                 {{ history.error_message }}
@@ -172,6 +186,57 @@
     };
     ws.onclose = () => addLog('WebSocket отключен', 'info');
     setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 30000);
+
+    // Byte-level progress polling (independent of WS — runs until finished).
+    const progressUrl =
+        '/servers/{{ server.id }}/backups/{{ config.id }}/runs/{{ history.id }}/progress';
+    const fmtMB = (b) => b == null ? '—' : (b / 1024 / 1024).toFixed(1) + ' MB';
+    const bar = document.getElementById('byte-bar');
+    const label = document.getElementById('byte-label');
+    const pct = document.getElementById('byte-pct');
+    const age = document.getElementById('byte-age');
+
+    async function pollBytes() {
+        try {
+            const r = await fetch(progressUrl);
+            if (!r.ok) return;
+            const d = await r.json();
+            if (d.phase === 'preparing') {
+                label.textContent = 'подготовка…';
+                pct.textContent = '—';
+                bar.style.width = '0%';
+                age.textContent = '';
+            } else if (d.phase === 'stalled') {
+                label.textContent = (d.current_item || '') + ' — завис';
+                label.className = 'text-red-400';
+                pct.textContent = (d.percent ?? 0) + '%';
+                bar.style.width = (d.percent ?? 0) + '%';
+                bar.className = 'h-full bg-red-500 transition-all';
+                age.textContent = 'обновлений нет ' + d.age_seconds + ' с';
+            } else if (d.phase === 'finished') {
+                label.textContent = d.current_item || (d.status || '');
+                label.className = 'text-dark-muted';
+                pct.textContent = d.percent == null ? '' : d.percent + '%';
+                bar.style.width = (d.percent ?? 100) + '%';
+                bar.className = 'h-full bg-green-500 transition-all';
+                age.textContent = '';
+                return 'stop';
+            } else {
+                label.textContent = d.current_item || '';
+                label.className = 'text-dark-text';
+                pct.textContent = d.percent + '%  (' + fmtMB(d.bytes_done) + ' / ' + fmtMB(d.bytes_total) + ')';
+                bar.style.width = d.percent + '%';
+                bar.className = 'h-full bg-blue-400 transition-all';
+                age.textContent = d.age_seconds != null ? ('обновлено ' + d.age_seconds + ' с назад') : '';
+            }
+        } catch (_) { /* ignore transient errors */ }
+    }
+
+    const bytesTimer = setInterval(async () => {
+        const r = await pollBytes();
+        if (r === 'stop') clearInterval(bytesTimer);
+    }, 5000);
+    pollBytes();
 })();
 </script>
 {% endblock %}

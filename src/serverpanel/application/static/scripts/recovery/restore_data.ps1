@@ -32,8 +32,11 @@ try {
         $keyFile = Join-Path $env:TEMP ("sp_sb_" + [Guid]::NewGuid().ToString("N"))
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($keyFile, $SB.private_key, $utf8NoBom)
+        # Grant by SID — $env:USERNAME resolves to "<HOST>$" under SYSTEM and
+        # icacls leaves the file with zero ACEs, breaking scp/ssh key load.
+        $mySid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
         icacls $keyFile /inheritance:r 2>&1 | Out-Null
-        icacls $keyFile /grant:r "${env:USERNAME}:F" 2>&1 | Out-Null
+        icacls $keyFile /grant:r "*${mySid}:F" "*S-1-5-18:F" "*S-1-5-32-544:F" 2>&1 | Out-Null
         $keyTemp = $true
     }
 

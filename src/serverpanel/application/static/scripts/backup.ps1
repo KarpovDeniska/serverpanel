@@ -41,6 +41,47 @@ function Write-Utf8($path, $text) {
     [System.IO.File]::WriteAllText($path, $text, $utf8NoBom)
 }
 
+# -----------------------------------------------------------------------------
+# progress.json writer — BackupService poller reads this during a live run.
+# Atomic write (temp + move) so the reader never catches half-flushed JSON.
+# -----------------------------------------------------------------------------
+$script:ProgressPath = Join-Path (Split-Path $ReportPath -Parent) "progress.json"
+$script:ProgressState = @{
+    bytes_total  = 0
+    bytes_done   = 0
+    current_item = ""
+}
+
+function Write-ProgressTick {
+    param(
+        [int64]$BytesDone = $script:ProgressState.bytes_done,
+        [int64]$BytesTotal = $script:ProgressState.bytes_total,
+        [string]$CurrentItem = $script:ProgressState.current_item
+    )
+    $script:ProgressState.bytes_done = $BytesDone
+    $script:ProgressState.bytes_total = $BytesTotal
+    $script:ProgressState.current_item = $CurrentItem
+    $payload = @{
+        bytes_total  = [int64]$BytesTotal
+        bytes_done   = [int64]$BytesDone
+        current_item = [string]$CurrentItem
+        updated_at   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    } | ConvertTo-Json -Compress
+    $tmp = "$($script:ProgressPath).tmp"
+    try {
+        [System.IO.File]::WriteAllText($tmp, $payload, $utf8NoBom)
+        Move-Item -LiteralPath $tmp -Destination $script:ProgressPath -Force
+    } catch {
+        # Progress is best-effort: a failed tick must never abort the backup.
+    }
+}
+
+function Clear-ProgressFile {
+    # Called at the very end so that a finished run does not leave a stale
+    # progress.json that the poller would still interpret as "running".
+    Remove-Item -LiteralPath $script:ProgressPath -Force -ErrorAction SilentlyContinue
+}
+
 function Get-PathSize($path) {
     if (-not (Test-Path -LiteralPath $path)) { return 0 }
     try {
@@ -300,8 +341,14 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         if ($conn.private_key) {
             $keyFile = Join-Path $env:TEMP ("sp_sbkey_" + [Guid]::NewGuid().ToString("N"))
             Write-Utf8 $keyFile $conn.private_key
+            # Restrict key file permissions (ssh refuses "world-readable" keys).
+            # Grant by SID, not $env:USERNAME — under SYSTEM the latter expands
+            # to "<HOST>$" (computer account), which icacls cannot resolve,
+            # leaving the file with NO ACEs after /inheritance:r and scp
+            # fails with "Load key: Permission denied" → exit 255.
+            $mySid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
             & icacls $keyFile /inheritance:r 2>&1 | Out-Null
-            & icacls $keyFile /grant:r "${env:USERNAME}:F" 2>&1 | Out-Null
+            & icacls $keyFile /grant:r "*${mySid}:F" "*S-1-5-18:F" "*S-1-5-32-544:F" 2>&1 | Out-Null
             $keyFileTemp = $true
         } elseif ($conn.ssh_key_path) {
             $keyFile = [Environment]::ExpandEnvironmentVariables($conn.ssh_key_path)
@@ -359,7 +406,11 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         & $RunSftpBatch $mkdirBatch | Out-Null
         Log "storage[$($dest.index)] sftp mkdir done"
 
-        # Same inherited-stdio problem applies to scp — wrap it in Start-Process.
+        # scp via Start-Process -Wait -PassThru. We can't poll lifetime from
+        # the main thread (main is blocked), so the heartbeat — updating
+        # progress.json's `updated_at` — is started once at scope entry as a
+        # background job and stopped in `finally`. It does NOT move bytes_done:
+        # that advances discretely after each alias completes.
         $RunScp = {
             param([string]$local, [string]$remote, [bool]$recursive)
             $outFile = Join-Path $env:TEMP ("sp_scp_" + [Guid]::NewGuid().ToString("N") + ".out")
@@ -373,7 +424,12 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
                     -NoNewWindow -Wait -PassThru `
                     -RedirectStandardOutput $outFile `
                     -RedirectStandardError $errFile
-                return $proc.ExitCode
+                $stderrText = ""
+                try {
+                    $stderrText = (Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue)
+                    if ($null -eq $stderrText) { $stderrText = "" }
+                } catch { $stderrText = "" }
+                return @{ ExitCode = $proc.ExitCode; StdErr = $stderrText.Trim() }
             } finally {
                 Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
                 Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
@@ -381,12 +437,49 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
         }
 
         $aliases = if ($dest.aliases.Count -eq 0) { @($sourcesByAlias.Keys) } else { @($dest.aliases) }
+
+        # Pre-compute an upfront total (sum of source sizes) so the UI can
+        # render a % right away. For `vss_dir`+zip sources this is the raw
+        # dir size — the actual zip will be smaller, so `bytes_done` may
+        # overshoot toward the end; the UI clamps to 100 %.
+        $planTotal = 0
+        foreach ($a in $aliases) {
+            $s = $sourcesByAlias[$a]
+            if ($s) { $planTotal += [int64](Get-PathSize $s.path) }
+        }
+        Write-ProgressTick -BytesDone 0 -BytesTotal $planTotal -CurrentItem ""
+
+        # Heartbeat job: while the main thread is blocked in scp/zip, this
+        # background job just rewrites progress.json's `updated_at` every 5s
+        # so the panel's stall detector does not fire for a genuinely-slow
+        # multi-GB upload. It does NOT touch bytes_done/bytes_total — the
+        # main thread owns those.
+        $heartbeatJob = Start-Job -ScriptBlock {
+            param($progressPath)
+            while ($true) {
+                Start-Sleep -Seconds 5
+                if (Test-Path -LiteralPath $progressPath) {
+                    try {
+                        $raw = Get-Content -LiteralPath $progressPath -Raw
+                        $obj = $raw | ConvertFrom-Json
+                        $obj.updated_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        $out = $obj | ConvertTo-Json -Compress
+                        $tmp = "$progressPath.tmp"
+                        [System.IO.File]::WriteAllText($tmp, $out, (New-Object System.Text.UTF8Encoding $false))
+                        Move-Item -LiteralPath $tmp -Destination $progressPath -Force -ErrorAction SilentlyContinue
+                    } catch { }
+                }
+            }
+        } -ArgumentList $script:ProgressPath
+
+        $planDone = 0
         foreach ($alias in $aliases) {
             $src = $sourcesByAlias[$alias]
             if (-not $src) {
                 $rec.items += @{ alias = $alias; status = "skipped"; error = "source alias not found" }
                 continue
             }
+            Write-ProgressTick -BytesDone $planDone -BytesTotal $planTotal -CurrentItem $alias
             try {
                 Log "storage[$($dest.index)] $alias staging (type=$($src.type), path=$($src.path))..."
                 $staged = Stage-Source $src $stageBase
@@ -395,12 +488,48 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
                 $sz = Get-PathSize $staged
                 Log "storage[$($dest.index)] $alias staged ($([math]::Round($sz/1MB,1)) MB) -> scp to $remoteTarget"
 
+                # Purge stale remote target before scp. Reason: scp -r on an
+                # EXISTING directory creates `target/<source-basename>/`
+                # inside it instead of merging, which leaves
+                # `.../1c_files/1c_files/...` on repeat runs — and then old
+                # files block fresh writes with "Permission denied". ssh on
+                # port 23 = Hetzner Storage Box limited shell; it accepts
+                # `rm -rf`. Ignore exit code: "nothing to delete" is fine,
+                # a transport failure will surface via scp anyway. NB: ssh
+                # uses lowercase -p (scp/sftp use -P) — can't reuse $sshOpts.
+                Log "storage[$($dest.index)] $alias purging stale remote $remoteTarget"
+                $sshCmdOpts = @(
+                    "-p", "$sbPort",
+                    "-i", "$keyFile",
+                    "-o", "BatchMode=yes",
+                    "-o", "StrictHostKeyChecking=accept-new",
+                    "-o", "UserKnownHostsFile=$env:ProgramData\serverpanel\known_hosts"
+                )
+                $rmArgs = $sshCmdOpts + @("${sbUser}@${sbHost}", "rm -rf '$remoteTarget'")
+                $rmOut = Join-Path $env:TEMP ("sp_rm_" + [Guid]::NewGuid().ToString("N") + ".out")
+                $rmErr = "$rmOut.err"
+                try {
+                    Start-Process -FilePath 'C:\Windows\System32\OpenSSH\ssh.exe' `
+                        -ArgumentList $rmArgs -NoNewWindow -Wait -PassThru `
+                        -RedirectStandardOutput $rmOut `
+                        -RedirectStandardError  $rmErr | Out-Null
+                } finally {
+                    Remove-Item $rmOut, $rmErr -Force -ErrorAction SilentlyContinue
+                }
+
                 $isDir = (Get-Item -LiteralPath $staged).PSIsContainer
-                $scpExit = & $RunScp $staged $remoteTarget $isDir
-                if ($scpExit -ne 0) { throw "scp exit $scpExit" }
+                $scpRes = & $RunScp $staged $remoteTarget $isDir
+                if ($scpRes.ExitCode -ne 0) {
+                    # Keep stderr tail short — it goes into the JSON report.
+                    $tail = $scpRes.StdErr
+                    if ($tail.Length -gt 1200) { $tail = $tail.Substring($tail.Length - 1200) }
+                    throw "scp exit $($scpRes.ExitCode): $tail"
+                }
 
                 $rec.items += @{ alias = $alias; status = "success"; remote_path = $remoteTarget; size_bytes = $sz }
                 $rec.size_bytes += $sz
+                $planDone += [int64]$sz
+                Write-ProgressTick -BytesDone $planDone -BytesTotal $planTotal -CurrentItem $alias
                 Log "storage[$($dest.index)] $alias -> $remoteTarget OK ($([math]::Round($sz/1MB,1)) MB)"
             } catch {
                 $rec.items += @{ alias = $alias; status = "failed"; error = "$_" }
@@ -408,18 +537,53 @@ function Invoke-StorageDestination($dest, $sourcesByAlias, $today, $stageBase) {
             }
         }
 
-        # Remote rotation - list $remoteBase, delete date folders older than cutoff
+        # Stop the heartbeat job — all aliases processed.
+        try {
+            Stop-Job -Job $heartbeatJob -ErrorAction SilentlyContinue
+            Remove-Job -Job $heartbeatJob -Force -ErrorAction SilentlyContinue
+        } catch { }
+
+        # Remote rotation — list $remoteBase, delete date folders older than
+        # cutoff. Uses ssh `rm -rf` because date folders contain nested
+        # source subdirs, and sftp's `rm $dir/*` is not recursive (it only
+        # removes first-level files, then `rmdir` fails on the still-non-
+        # empty dir, silently leaving old backups around forever).
         if ($dest.date_folder -and $dest.rotation_days -gt 0) {
             $cutoff = (Get-Date).AddDays(-$dest.rotation_days).ToString("yyyy-MM-dd")
             try {
+                # sftp `ls -1` returns FULL paths (`backups/daily/2026-04-04`),
+                # not just basenames. Strip to basename before matching —
+                # otherwise the date regex never matches and rotation is a
+                # silent no-op (this has been broken since day one).
                 $listing = & $RunSftpBatch "ls -1 $remoteBase/`n"
                 $oldDirs = $listing |
-                    ForEach-Object { $_.Trim() } |
+                    ForEach-Object { ($_.Trim() -split '/')[-1] } |
                     Where-Object { $_ -match '^\d{4}-\d{2}-\d{2}$' -and $_ -lt $cutoff }
+                $rotSshOpts = @(
+                    "-p", "$sbPort",
+                    "-i", "$keyFile",
+                    "-o", "BatchMode=yes",
+                    "-o", "StrictHostKeyChecking=accept-new",
+                    "-o", "UserKnownHostsFile=$env:ProgramData\serverpanel\known_hosts"
+                )
                 foreach ($d in $oldDirs) {
-                    $rmCmd = "rm $remoteBase/$d/*`nrmdir $remoteBase/$d`n"
-                    & $RunSftpBatch $rmCmd | Out-Null
-                    Log "storage[$($dest.index)] rotated $remoteBase/$d"
+                    $rotOut = Join-Path $env:TEMP ("sp_rot_" + [Guid]::NewGuid().ToString("N") + ".out")
+                    $rotErr = "$rotOut.err"
+                    try {
+                        $rotArgs = $rotSshOpts + @("${sbUser}@${sbHost}", "rm -rf '$remoteBase/$d'")
+                        $rp = Start-Process -FilePath 'C:\Windows\System32\OpenSSH\ssh.exe' `
+                            -ArgumentList $rotArgs -NoNewWindow -Wait -PassThru `
+                            -RedirectStandardOutput $rotOut `
+                            -RedirectStandardError  $rotErr
+                        if ($rp.ExitCode -eq 0) {
+                            Log "storage[$($dest.index)] rotated $remoteBase/$d"
+                        } else {
+                            $et = Get-Content -LiteralPath $rotErr -Raw -ErrorAction SilentlyContinue
+                            Log "storage[$($dest.index)] rotation FAIL $remoteBase/$d exit=$($rp.ExitCode): $et"
+                        }
+                    } finally {
+                        Remove-Item $rotOut, $rotErr -Force -ErrorAction SilentlyContinue
+                    }
                 }
             } catch { Log "storage rotation warn: $_" }
         }
@@ -450,7 +614,12 @@ try {
 }
 
 Log "=== backup run $runId - config '$($plan.config_name)' ==="
-Log "sources: $($plan.sources.Count), destinations: $($plan.destinations.Count), today: $($plan.date_folder)"
+# Live date string for date_folder layout — NEVER use $plan.date_folder here.
+# $plan.date_folder is frozen at install_schedule time and would pin every
+# nightly run into the same date folder (breaking rotation + colliding scp
+# writes with "Permission denied" on overwrite).
+$todayStr = Get-Date -Format "yyyy-MM-dd"
+Log "sources: $($plan.sources.Count), destinations: $($plan.destinations.Count), today: $todayStr"
 
 # Resolve zip compression level once (plan.options.zip_level is "fastest"|"optimal";
 # default to Fastest — 2-3x faster than Optimal at the cost of ~15% size).
@@ -479,9 +648,9 @@ foreach ($dest in $plan.destinations) {
     Log "destination[$($dest.index)] kind=$($dest.kind) starting"
     try {
         if ($dest.kind -eq "local") {
-            $rec = Invoke-LocalDestination $dest $sourcesByAlias $plan.date_folder
+            $rec = Invoke-LocalDestination $dest $sourcesByAlias $todayStr
         } elseif ($dest.kind -eq "storage") {
-            $rec = Invoke-StorageDestination $dest $sourcesByAlias $plan.date_folder $stagingRoot
+            $rec = Invoke-StorageDestination $dest $sourcesByAlias $todayStr $stagingRoot
         } else {
             $rec = @{ index = $dest.index; kind = $dest.kind; status = "failed"; error = "unknown kind"; items = @(); size_bytes = 0 }
         }
@@ -501,6 +670,10 @@ try {
         Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 } catch { }
+
+# Progress file must disappear now — otherwise the poller would keep reading
+# it on future runs and show a "running" state for a job that already ended.
+Clear-ProgressFile
 
 $report = @{
     run_id = $runId
@@ -536,7 +709,14 @@ if ($plan.PSObject.Properties.Name -contains 'notifications' -and $plan.notifica
 # A daily ✅ becomes a heartbeat; its absence is itself the alert.
 if ($tg -and $tg.bot_token -and $tg.chat_id) {
     try {
-        $totalMb = [math]::Round((($results | Measure-Object -Property size_bytes -Sum).Sum) / 1MB, 1)
+        # Manual sum — Measure-Object -Property does not see hashtable keys
+        # in PS 5.1 (only PSCustomObject properties), so piping $results at
+        # it silently returned 0 MB even on multi-GB runs.
+        $totalBytes = 0
+        foreach ($r in $results) {
+            if ($r.size_bytes) { $totalBytes += [int64]$r.size_bytes }
+        }
+        $totalMb = [math]::Round($totalBytes / 1MB, 1)
         $icon = switch ($overall) {
             "success" { "✅" }
             "partial" { "⚠️" }
@@ -548,10 +728,18 @@ if ($tg -and $tg.bot_token -and $tg.chat_id) {
             "Destinations: ok=$okCount failed=$failedCount partial=$partialAny | Size: ${totalMb} MB"
         )
         # Detail failing destinations only (success list can be long and noisy).
+        # For partial ones the destination-level `error` is empty — the real
+        # cause lives on per-item entries, list the failing aliases instead.
         foreach ($r in $results) {
-            if ($r.status -ne "success") {
-                $err = if ($r.error) { $r.error } else { "(no error message)" }
-                $lines += "• [$($r.index)] $($r.kind) $($r.status): $err"
+            if ($r.status -eq "success") { continue }
+            $lines += "• [$($r.index)] $($r.kind) $($r.status)"
+            if ($r.error) { $lines += "  $($r.error)" }
+            $failedItems = @($r.items | Where-Object { $_.status -eq "failed" })
+            foreach ($it in $failedItems) {
+                $itemErr = if ($it.error) { $it.error } else { "(no error)" }
+                # Trim long stderr tails to keep the message readable.
+                if ($itemErr.Length -gt 220) { $itemErr = $itemErr.Substring(0, 220) + "…" }
+                $lines += "  - $($it.alias): $itemErr"
             }
         }
         $text = ($lines -join "`n")

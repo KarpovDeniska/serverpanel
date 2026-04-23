@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -179,6 +189,7 @@ class BackupConfig(Base):
     destinations: Mapped[dict] = mapped_column(JSON)
     schedule: Mapped[str | None] = mapped_column(String(100))
     rotation_days: Mapped[int] = mapped_column(Integer, default=14)
+    stall_threshold_seconds: Mapped[int] = mapped_column(Integer, default=120)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, server_default=func.now()
     )
@@ -204,6 +215,12 @@ class BackupHistory(Base):
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     details: Mapped[dict | None] = mapped_column(JSON)
     error_message: Mapped[str | None] = mapped_column(Text)
+    # Byte-level progress, polled from remote `progress.json` during a run.
+    # Null until the tracker writes its first tick; non-null after that.
+    bytes_total: Mapped[int | None] = mapped_column(BigInteger)
+    bytes_done: Mapped[int | None] = mapped_column(BigInteger)
+    current_item: Mapped[str | None] = mapped_column(String(255))
+    progress_updated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
     backup_config: Mapped[BackupConfig] = relationship(back_populates="history")
 

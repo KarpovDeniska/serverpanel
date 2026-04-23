@@ -24,13 +24,14 @@ from serverpanel.domain.backup import (
     LocalDestination,
     StorageDestination,
 )
+from serverpanel.domain.backup_progress import BackupProgress, InvalidProgressError
 from serverpanel.domain.enums import BackupStatus
 from serverpanel.domain.progress import NullProgressReporter, ProgressReporter
 from serverpanel.infrastructure.crypto import decrypt_json
 from serverpanel.infrastructure.database.repositories.backups import (
     StorageConfigRepository,
 )
-from serverpanel.infrastructure.ssh.client import AsyncSSHClient
+from serverpanel.infrastructure.ssh.client import AsyncSSHClient, SSHCommandError
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +60,10 @@ def _task_name(config_id: int) -> str:
 def _scheduled_paths(config_id: int) -> tuple[str, str, str]:
     base = f"{REMOTE_CONFIGS_DIR}\\{config_id}"
     return base, base + r"\plan.json", base + r"\last_report.json"
+
+
+def _progress_path(config_id: int) -> str:
+    return f"{REMOTE_CONFIGS_DIR}\\{config_id}\\progress.json"
 
 
 def _parse_schedule(expr: str | None) -> dict | None:
@@ -108,6 +113,13 @@ _SCRIPT_PATH = (
     / "scripts"
     / "backup.ps1"
 )
+_WATCHDOG_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "static"
+    / "scripts"
+    / "watchdog.ps1"
+)
+REMOTE_WATCHDOG = REMOTE_DIR + r"\watchdog.ps1"
 
 
 BACKUP_PHASES = (
@@ -298,7 +310,11 @@ class BackupService:
             "config_id": config.id,
             "config_name": config.name,
             "run_at": now.isoformat() + "Z",
-            "date_folder": now.strftime("%Y-%m-%d"),
+            # NOTE: no top-level "date_folder" — that used to be a frozen date
+            # string read by backup.ps1, which pinned every nightly run into
+            # the same subfolder and broke rotation. backup.ps1 now derives
+            # the date live at run time. Destination-level `date_folder` is
+            # still a bool flag and stays in resolved_destinations.
             "day_of_week": now.strftime("%A"),
             "global_rotation_days": config.rotation_days,
             "sources": [s.model_dump() for s in plan.sources],
@@ -353,27 +369,30 @@ class BackupService:
             log.info("Pinned SSH host key for server %s", server.id)
 
     async def _deploy_script(self, ssh: AsyncSSHClient) -> None:
-        """Upload backup.ps1 if remote hash differs. Creates remote dir if missing."""
-        local = _SCRIPT_PATH.read_bytes()
-        local_hash = hashlib.sha256(local).hexdigest()
-
+        """Upload backup.ps1 + watchdog.ps1 if remote hashes differ."""
         await ssh.execute(
             f'powershell -NoProfile -Command '
             f'"New-Item -ItemType Directory -Force -Path \'{REMOTE_DIR}\' | Out-Null"',
             timeout=30,
         )
+        await self._deploy_one(ssh, _SCRIPT_PATH, REMOTE_SCRIPT)
+        await self._deploy_one(ssh, _WATCHDOG_PATH, REMOTE_WATCHDOG)
 
+    async def _deploy_one(
+        self, ssh: AsyncSSHClient, local_path: Path, remote_path: str
+    ) -> None:
+        local = local_path.read_bytes()
+        local_hash = hashlib.sha256(local).hexdigest()
         r = await ssh.execute(
             f'powershell -NoProfile -Command '
-            f'"if (Test-Path \'{REMOTE_SCRIPT}\') '
-            f'{{ (Get-FileHash -Algorithm SHA256 \'{REMOTE_SCRIPT}\').Hash.ToLower() }} '
+            f'"if (Test-Path \'{remote_path}\') '
+            f'{{ (Get-FileHash -Algorithm SHA256 \'{remote_path}\').Hash.ToLower() }} '
             f'else {{ \'\' }}"',
             timeout=30,
         )
         remote_hash = (r.stdout or "").strip().lower()
-        if remote_hash == local_hash:
-            return
-        await ssh.put_file(REMOTE_SCRIPT, local)
+        if remote_hash != local_hash:
+            await ssh.put_file(remote_path, local)
 
     # ------------------------------------------------------------------
     # Reporting
@@ -470,65 +489,159 @@ class BackupService:
             )
             await ssh.put_file(plan_path, json.dumps(resolved, ensure_ascii=False, indent=2))
 
-            if trigger["kind"] == "monthly":
-                # Monthly via schtasks.exe + a static .cmd wrapper: CIM
-                # MSFT_TaskMonthlyTrigger.DaysOfMonth (uint32[]) refuses to be
-                # assigned from PS 5.1's adapter, and XML register is fragile
-                # in an ssh exec_command context. schtasks has worked since
-                # Win2003; wrapping the PowerShell invocation in a .cmd lets
-                # /tr accept a path without nested-quote hell.
-                wrapper_path = base + r"\trigger.cmd"
-                wrapper_body = (
-                    "@echo off\r\n"
-                    f'powershell.exe -ExecutionPolicy Bypass -NoProfile -File "{REMOTE_SCRIPT}" '
-                    f'-PlanPath "{plan_path}" -ReportPath "{report_path}"\r\n'
-                )
-                await ssh.put_file(wrapper_path, wrapper_body)
-
-                register_cmd = (
-                    f'schtasks /create /tn "{task}" /tr "{wrapper_path}" '
-                    f'/sc MONTHLY /d {trigger["day"]} /st {trigger["at"]} '
-                    f'/ru SYSTEM /rl HIGHEST /f'
-                )
-                r = await ssh.execute(register_cmd, timeout=60)
-                if r.exit_code != 0:
-                    raise RuntimeError(
-                        f"schtasks /create MONTHLY failed (exit {r.exit_code}): "
-                        f"{(r.stderr or r.stdout)[-400:]}"
-                    )
-                return  # done, skip the Register-ScheduledTask path below
-
-            ps_args = (
-                f'-ExecutionPolicy Bypass -NoProfile -File \\"{REMOTE_SCRIPT}\\" '
-                f'-PlanPath \\"{plan_path}\\" -ReportPath \\"{report_path}\\"'
+            # All triggers go through a .cmd wrapper + schtasks /tr. Direct
+            # Register-ScheduledTask / schtasks with the full powershell
+            # invocation as /tr argument explodes on quote-escaping across the
+            # ssh → cmd → powershell pipeline: the second half of the command
+            # spills into <Arguments>/<WorkingDirectory> and the task fails at
+            # launch with ERROR_DIRECTORY (0x8007010B).
+            #
+            # The wrapper does two things:
+            #   1. Run backup.ps1. It sends its own ✅/⚠️/❌ Telegram when it
+            #      finishes.
+            #   2. Call watchdog.ps1. If the report is missing or older than
+            #      this run, watchdog sends a "❌ killed by timeout" Telegram
+            #      — otherwise it stays silent. `StartedEpoch` is captured
+            #      BEFORE backup.ps1 runs, in wrapper-process local time, so
+            #      watchdog can tell "was this run's report written?" without
+            #      guessing.
+            wrapper_path = base + r"\trigger.cmd"
+            wrapper_body = (
+                "@echo off\r\n"
+                "for /f %%s in ('powershell -NoProfile -Command "
+                "\"[int][double]::Parse(((Get-Date).ToUniversalTime() - "
+                "[DateTime]'1970-01-01').TotalSeconds)\"') do set __sp_started=%%s\r\n"
+                f'powershell.exe -ExecutionPolicy Bypass -NoProfile -File "{REMOTE_SCRIPT}" '
+                f'-PlanPath "{plan_path}" -ReportPath "{report_path}"\r\n'
+                f'powershell.exe -ExecutionPolicy Bypass -NoProfile -File "{REMOTE_WATCHDOG}" '
+                f'-PlanPath "{plan_path}" -ReportPath "{report_path}" '
+                f'-StartedEpoch %__sp_started%\r\n'
             )
+            await ssh.put_file(wrapper_path, wrapper_body)
 
             if trigger["kind"] == "daily":
-                trigger_cmd = f"New-ScheduledTaskTrigger -Daily -At '{trigger['at']}'"
+                sched_args = f'/sc DAILY /st {trigger["at"]}'
             elif trigger["kind"] == "weekly":
-                trigger_cmd = (
-                    f"New-ScheduledTaskTrigger -Weekly -DaysOfWeek {trigger['day']} "
-                    f"-At '{trigger['at']}'"
-                )
+                sched_args = f'/sc WEEKLY /d {trigger["day"]} /st {trigger["at"]}'
+            elif trigger["kind"] == "monthly":
+                sched_args = f'/sc MONTHLY /d {trigger["day"]} /st {trigger["at"]}'
             else:
                 raise ValueError(f"unreachable: {trigger}")
 
             register_cmd = (
-                f'powershell -NoProfile -Command "'
-                f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument \\\"{ps_args}\\\"; "
-                f"$trigger = {trigger_cmd}; "
-                f"$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries "
-                f"-DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew; "
-                f"Register-ScheduledTask -TaskName '{task}' -Action $action -Trigger $trigger "
-                f"-Settings $settings -User 'SYSTEM' -RunLevel Highest -Force | Out-Null"
-                f'"'
+                f'schtasks /create /tn "{task}" /tr "{wrapper_path}" '
+                f'{sched_args} /ru SYSTEM /rl HIGHEST /f'
             )
             r = await ssh.execute(register_cmd, timeout=60)
             if r.exit_code != 0:
                 raise RuntimeError(
-                    f"Register-ScheduledTask failed (exit {r.exit_code}): "
+                    f"schtasks /create {trigger['kind'].upper()} failed (exit {r.exit_code}): "
                     f"{(r.stderr or r.stdout)[-400:]}"
                 )
+
+            # Default ExecutionTimeLimit via `schtasks` is 72 h, which makes
+            # "kill a stuck backup" meaningless. Clamp to 30 min — watchdog.ps1
+            # then produces a Telegram alert on the kill.
+            clamp_cmd = (
+                'powershell -NoProfile -Command "'
+                f"$t = Get-ScheduledTask -TaskName '{task}'; "
+                "$t.Settings.ExecutionTimeLimit = 'PT30M'; "
+                "Set-ScheduledTask -InputObject $t | Out-Null"
+                '"'
+            )
+            cr = await ssh.execute(clamp_cmd, timeout=60)
+            if cr.exit_code != 0:
+                raise RuntimeError(
+                    "Set-ScheduledTask (ExecutionTimeLimit=PT30M) failed "
+                    f"(exit {cr.exit_code}): {(cr.stderr or cr.stdout)[-400:]}"
+                )
+
+            await self._validate_scheduled_task(ssh, task, wrapper_path)
+
+    async def _validate_scheduled_task(
+        self, ssh: AsyncSSHClient, task: str, wrapper_path: str
+    ) -> None:
+        """Read the just-registered task XML and assert that schtasks parsed
+        the wrapper path as a single <Command> with no leaked <Arguments>
+        or <WorkingDirectory>. Catches quote-escaping regressions like the
+        one that silently broke serverpanel-backup-2 on 2026-04-22.
+        """
+        r = await ssh.execute(f'schtasks /query /xml /tn "{task}"', timeout=30)
+        if r.exit_code != 0:
+            raise RuntimeError(
+                f"post-install validation: cannot read XML of '{task}' "
+                f"(exit {r.exit_code}): {(r.stderr or r.stdout)[-400:]}"
+            )
+        xml = r.stdout or ""
+        cmd_line = f"<Command>{wrapper_path}</Command>"
+        if cmd_line not in xml:
+            raise RuntimeError(
+                f"post-install validation: task '{task}' has unexpected <Command> "
+                f"(want {wrapper_path!r}). XML tail: {xml[-600:]}"
+            )
+        if "<Arguments>" in xml or "<WorkingDirectory>" in xml:
+            raise RuntimeError(
+                f"post-install validation: task '{task}' has leaked "
+                f"<Arguments>/<WorkingDirectory>. XML tail: {xml[-600:]}"
+            )
+
+    async def fetch_live_progress(
+        self, config: BackupConfig
+    ) -> BackupProgress | None:
+        """Read `progress.json` from the remote server for a single config.
+
+        Returns:
+            * `BackupProgress` when the file exists and parses.
+            * `None` when the file is missing (run not started or already
+              finished and `progress.json` was cleared).
+
+        Raises only on SSH transport errors — JSON/shape errors return None
+        (caller should not treat malformed progress as a hard failure).
+        """
+        if not config.server.ssh_key_encrypted:
+            return None
+
+        path = _progress_path(config.id)
+        try:
+            async with self._open_ssh(config.server) as ssh:
+                await self._persist_learned_host_key()
+                try:
+                    raw = await ssh.fetch_file(path)
+                except Exception:
+                    return None
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+                return BackupProgress.from_json(payload)
+            except (ValueError, InvalidProgressError):
+                log.warning("malformed progress.json at %s", path)
+                return None
+        except Exception as e:
+            raise SSHCommandError(f"fetch_live_progress: {e}") from e
+
+    async def sync_progress_to_history(
+        self, history: BackupHistory, config: BackupConfig
+    ) -> BackupProgress | None:
+        """Pull progress.json and write byte-level fields into `history`.
+
+        Commits inside. Returns the ingested progress (or None).
+        """
+        from serverpanel.infrastructure.database.models import (
+            BackupHistory as _BackupHistory,
+        )
+        # Re-attach through the session to avoid stale ORM state
+        _BackupHistory  # noqa: B018
+
+        progress = await self.fetch_live_progress(config)
+        if progress is None:
+            return None
+
+        history.bytes_total = progress.bytes_total
+        history.bytes_done = progress.bytes_done
+        history.current_item = progress.current_item
+        history.progress_updated_at = progress.updated_at.replace(tzinfo=None)
+        self.db.add(history)
+        await self.db.commit()
+        return progress
 
     async def sync_reports_from_server(self, server: Server) -> int:
         """Pull Task-Scheduler-driven backup reports from the target server
@@ -546,6 +659,11 @@ class BackupService:
             return 0
 
         from sqlalchemy import select as _select
+
+        from serverpanel.infrastructure.database.models import (
+            BackupHistory as _BackupHistory,
+        )
+        BackupHistory = _BackupHistory  # noqa: N806 — shadow TYPE_CHECKING alias at runtime
         created = 0
 
         async with self._open_ssh(server) as ssh:

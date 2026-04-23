@@ -77,7 +77,8 @@ async def list_backups(
     # query (subquery on MAX(id) grouped by config_id) instead of N+1.
     latest_by_config: dict[int, BackupHistory] = {}
     if configs:
-        from sqlalchemy import func, select as _select
+        from sqlalchemy import func
+        from sqlalchemy import select as _select
         config_ids = [c.id for c in configs]
         latest_ids_subq = (
             _select(func.max(BackupHistory.id))
@@ -385,6 +386,73 @@ async def run_progress(
         "config": cfg,
         "history": history,
     })
+
+
+@router.get("/{config_id}/runs/{history_id}/progress")
+async def run_live_progress(
+    server_id: int,
+    config_id: int,
+    history_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Live byte-progress for a running backup. Polled by the UI every N s.
+
+    Returns a compact JSON:
+        { phase: "running" | "stalled" | "finished" | "preparing",
+          bytes_done, bytes_total, current_item, percent, age_seconds }
+    """
+    import datetime as _dt
+
+    from serverpanel.application.services.backup_service import BackupService
+    from serverpanel.domain.backup_progress import is_stalled
+
+    server = await _server_or_404(server_id, user, db)
+    cfg = await _config_or_404(config_id, server, db)
+    history = await db.get(BackupHistory, history_id)
+    if not history or history.backup_config_id != cfg.id:
+        raise HTTPException(404, "Run not found")
+
+    # Finished runs never have a live progress.json; serve what's in DB.
+    if history.status in ("success", "failed", "partial"):
+        return {
+            "phase": "finished",
+            "bytes_done": history.bytes_done,
+            "bytes_total": history.bytes_total,
+            "current_item": history.current_item,
+            "percent": (
+                round(100.0 * history.bytes_done / history.bytes_total, 1)
+                if history.bytes_total else None
+            ),
+            "age_seconds": None,
+            "status": history.status,
+        }
+
+    svc = BackupService(db)
+    progress = await svc.sync_progress_to_history(history, cfg)
+    now = _dt.datetime.now(_dt.UTC)
+    if progress is None:
+        return {
+            "phase": "preparing",
+            "bytes_done": None,
+            "bytes_total": None,
+            "current_item": None,
+            "percent": None,
+            "age_seconds": None,
+            "status": history.status,
+        }
+    stalled = is_stalled(
+        progress, now=now, threshold_seconds=cfg.stall_threshold_seconds
+    )
+    return {
+        "phase": "stalled" if stalled else "running",
+        "bytes_done": progress.bytes_done,
+        "bytes_total": progress.bytes_total,
+        "current_item": progress.current_item,
+        "percent": progress.percent,
+        "age_seconds": int((now - progress.updated_at).total_seconds()),
+        "status": history.status,
+    }
 
 
 @router.websocket("/ws/{history_id}")
